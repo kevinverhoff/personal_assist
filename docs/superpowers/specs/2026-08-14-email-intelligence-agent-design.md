@@ -29,10 +29,12 @@ design choice below optimizes for recall over automation.
   (This phase produces a lightweight per-run Notion summary for review, not
   a polished briefing product.)
 - Monitoring any account other than personal Gmail.
-- Automatically creating new People/Organizations records from discovered
-  senders (mirrors the "don't invent" rule already applied to the
-  People/Organizations database — new-person detection is surfaced for
-  review, never auto-committed).
+- Silently merging two different People who happen to share a name, or
+  overwriting a Person/Organization's already-`Confirmed` data without
+  flagging it. (Note: this phase *does* auto-create/auto-update People,
+  Email Addresses, Organizations, and Affiliations from discovered senders —
+  see §6b — but every such write is marked `Needs Review` / `Inferred`, never
+  silently treated as settled fact.)
 - Cost/volume optimization (e.g. a rules-first funnel that skips the LLM for
   obvious bulk mail). Every message gets a full classification pass in this
   phase; optimization is deferred until real volume is observed.
@@ -163,6 +165,44 @@ Every message gets a line; nothing is summarized away. This is the primary
 way you sanity-check the classifier while testing locally — the Notion page
 mirrors the same summary for when you're away from your machine.
 
+## 6b. Sender → Person reconciliation
+
+People can now have multiple email addresses (Notion schema change: a new
+**Email Addresses** database — Person relation, Email, Label, `Confidence`
+— replaces the old single Email field on People, which supported only one
+address per person). This removes the need for duplicate-candidate handling
+in the common case: attaching an additional real address to someone already
+known is never a conflict.
+
+For each message's sender, in order:
+
+1. **Exact match** against any of a Person's linked Email Addresses → known,
+   nothing to do.
+2. **No email match, but the sender's display name closely matches an
+   existing Person** → attach the discovered address as a new Email
+   Addresses row on that Person, `Confidence = Inferred - needs review`.
+   True whether that Person already has zero or several addresses on file —
+   this is exactly the "map real correspondence back onto the people we
+   already know" case, and multi-email support means it's always just an
+   addition, never a merge decision.
+3. **No match at all, and the classifier judges this is a real human (not
+   automated)** → auto-create a new Person (`Status = Needs Review`) and a
+   new Email Addresses row (`Confidence = Inferred - needs review`). If the
+   message body has a parseable signature block, the classifier also
+   extracts any Title/Organization mentioned there and creates/matches that
+   Organization plus an Affiliation row (`Confidence = Inferred - needs
+   review`) — same pattern already used for the WICAA/Plan Commission
+   affiliations. A cheap secondary signal: if the sender's email domain
+   matches an existing Organization's Website domain, suggest that
+   affiliation even with no signature. No signature or domain match → the
+   Person is created with just a name and an email, nothing invented.
+
+Every record this step writes is visibly marked as unconfirmed
+(`Status`/`Confidence` = `Needs Review`/`Inferred`) — nothing the agent
+writes is ever presented to Notion as settled fact. You review and flip
+these at your own pace; the agent never re-flags something you've already
+confirmed.
+
 ## 7. Data model (local SQLite now, Cloudflare D1 later — identical schema)
 
 ```sql
@@ -227,14 +267,17 @@ CREATE TABLE run_log (
 
 ## 10. Known limitations (stated upfront, not discovered later)
 
-- Sender-to-Person matching depends on the People database having real email
-  addresses recorded. Most of the 32 people created from meeting history
-  don't have one yet (by design — we don't invent contact info). Matching
-  will improve over time: (a) a small batch of public officials' published
-  work emails is being backfilled now as a starting point, and (b) once this
-  agent is live, real correspondent addresses seen in actual mail can be
-  matched to People by name and backfilled with real confidence, rather than
-  guessed.
+- Sender-to-Person matching starts from a small base: 5 of the 32 people
+  created from meeting history have a `Confirmed` work email on file (public
+  officials, backfilled from official directories); the rest have none yet.
+  §6b's reconciliation logic is exactly the mechanism that improves this over
+  time — every real message from someone already in People gets their
+  address attached automatically (flagged `Needs Review`, never silently
+  trusted), so the database fills in the more this agent actually runs.
+- Signature/domain-based Organization and Affiliation inference (§6b step 3)
+  is necessarily heuristic — it will miss unusual signature formats and
+  occasionally guess wrong. That's fine: it's marked `Inferred - needs
+  review`, never presented as confirmed.
 - This phase has no user-facing action loop — "review" is a Notion page, not
   an approve/reject interface. That comes later once we're ready to move
   past observe-only.
@@ -246,7 +289,7 @@ root documents every variable with no real values) — `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GEMINI_API_KEY`,
 `NOTION_TOKEN`, `NOTION_PEOPLE_DATA_SOURCE_ID`,
 `NOTION_ORGANIZATIONS_DATA_SOURCE_ID`, `NOTION_AFFILIATIONS_DATA_SOURCE_ID`,
-`DB_PATH`, `LOG_PATH`.
+`NOTION_EMAIL_ADDRESSES_DATA_SOURCE_ID`, `DB_PATH`, `LOG_PATH`.
 
 Phase 1b adds `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`,
 `CLOUDFLARE_API_TOKEN` as GitHub Actions encrypted secrets, at which point
