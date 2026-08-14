@@ -24,11 +24,14 @@ design choice below optimizes for recall over automation.
 ## 2. Non-goals (explicitly out of scope for this phase)
 
 - Any Gmail mutation: archive, delete, label, move, mark read/unread, send,
-  or filter changes.
-- Generating and delivering an actual daily/weekly digest email or document.
-  (This phase produces a lightweight per-run Notion summary for review, not
-  a polished briefing product.)
+  or filter changes. The daily/weekly digest (§6c) is written to Notion and
+  the local log — it is never sent as an email; producing it is in scope,
+  delivering it via Gmail is not.
 - Monitoring any account other than personal Gmail.
+- Signature/domain-based Organization and Affiliation auto-inference (moved
+  to a v1.1 fast-follow — see §6b step 3 and §10). v1 auto-creates People and
+  Email Addresses only, deliberately, to avoid testing the riskiest new logic
+  in the same release as the unvalidated core classification loop.
 - Silently merging two different People who happen to share a name, or
   overwriting a Person/Organization's already-`Confirmed` data without
   flagging it. (Note: this phase *does* auto-create/auto-update People,
@@ -44,18 +47,30 @@ design choice below optimizes for recall over automation.
 **Phase 1 (now): local.**
 
 ```
-You, running `python main.py` on your own machine
+You, running `python main.py [--dry-run]` on your own machine
   └─ Python job (single entrypoint, run to completion each invocation)
        ├─ gmail_client: OAuth2 (gmail.readonly), fetch messages since last
-       │    checkpoint via Gmail history API
-       ├─ people_lookup: match sender against Notion People/Organizations
+       │    checkpoint, scoped to `in:inbox` only — mail your existing
+       │    filters already routed elsewhere is not reprocessed here
+       ├─ people_lookup: loads all People/Emails/Organizations into memory
+       │    once per run (small dataset), matches each sender against that
+       │    cache rather than querying Notion per message
        ├─ classifier: one structured Gemini call per message → 7-dimension
        │    judgment
        ├─ store: upsert results + checkpoint into a local SQLite file
-       │    (schema-identical to the future D1 tables — see §7)
+       │    (schema-identical to the future D1 tables — see §7).
+       │    `--dry-run` logs every Notion write §6b would make without
+       │    making it
        └─ agent_log: append a human-readable run summary to a local
             "notepad" log file, and update the Notion "Email Agent —
             Latest Run" page
+
+You, running `python digest.py --period daily|weekly` whenever you want it
+  └─ reads stored messages for the window from SQLite, groups the routine
+       ones, asks Gemini to phrase a summary (§6c), writes it to Notion +
+       the notepad log
+
+You, running `python feedback.py` to correct a stored classification (§6d)
 ```
 
 All state lives in the local SQLite file (path from `DB_PATH` in `.env`).
@@ -71,18 +86,25 @@ changes — this is purely a deployment change, not a redesign.
 
 - `gmail_client.py` — loads OAuth2 credentials (client id/secret + stored
   refresh token), refreshes the access token, calls the Gmail API
-  `users.history.list` to get message IDs changed since the last known
-  `historyId`, then `users.messages.get` for each to pull headers, snippet,
-  and body. Read-only scope only: `https://www.googleapis.com/auth/gmail.readonly`.
+  `users.history.list` (query scoped to `in:inbox`) to get message IDs
+  changed since the last known `historyId`, then `users.messages.get` for
+  each to pull headers, snippet, and body. Read-only scope only:
+  `https://www.googleapis.com/auth/gmail.readonly`.
 - `signals.py` — cheap, deterministic feature extraction from message
   headers: `List-Unsubscribe` presence, `Precedence`/bulk-mail headers,
   sender domain, whether the sender address matches a known automated
   pattern (e.g. `no-reply@`). These are passed to the classifier as context,
   never used to skip classification.
-- `people_lookup.py` — queries the Notion People and Organizations data
-  sources (reusing the existing MCP/REST patterns) to find a match for the
-  sender's email or display name. Returns whatever is found: matched person
-  page ID, VIP/importance flag, linked organizations/roles — or nothing.
+- `people_lookup.py` — at the start of each run, loads every People page (with
+  linked Email Addresses and Organizations) into memory once, rather than
+  querying Notion per message. Matching, in order: (1) exact match on any
+  linked email address; (2) normalized display-name match (case/whitespace
+  folded, common suffix/prefix like "Jr."/titles stripped) against an
+  existing Person — only above a deliberately high similarity bar; anything
+  weaker is logged as a possible match in the notepad log but **not** written
+  to Notion at all, to keep spoofed/coincidental name matches from touching
+  real records. Returns whatever is found (or nothing) for the classifier
+  and for §6b to act on.
 - `classifier.py` — builds a single Gemini prompt per message containing:
   subject/snippet/body excerpt, extracted signals, and any People/Org match
   context. Calls Gemini with a `response_schema` for guaranteed structured
@@ -91,16 +113,24 @@ changes — this is purely a deployment change, not a redesign.
 - `store.py` — SQLite client (Python's built-in `sqlite3`, no extra
   dependency) against the local `DB_PATH` file. Upserts one row per message
   (keyed by `gmail_message_id`, so re-processing the same message is
-  harmless), updates `sync_state`, and appends to `run_log`. Written so the
-  only thing that changes for the Phase 1b D1 swap is this file.
+  harmless), updates `sync_state`, and appends to `run_log` and `feedback`
+  (§6d). Written so the only thing that changes for the Phase 1b D1 swap is
+  this file.
 - `agent_log.py` — the "notepad" log: appends a timestamped, human-readable
   section to `LOG_PATH` (plain Markdown) every run — see §6a for format.
   Also updates the single Notion "Email Agent — Latest Run" page with the
-  same summary, so it's checkable from your phone too.
-- `main.py` — orchestrates the above in order. In Phase 1 you run this
-  directly (`python main.py`); Phase 1b adds a GitHub Actions workflow that
-  calls the same entrypoint on a cron schedule instead of you doing it by
-  hand.
+  same summary, so it's checkable from your phone too. Shared by `main.py`
+  and `digest.py`.
+- `digest.py` — the daily/weekly digest generator (§6c). Separate entrypoint,
+  run whenever you want one — nothing about it is scheduled in Phase 1.
+- `feedback.py` — the correction-capture CLI (§6d). Separate entrypoint.
+- `main.py` — orchestrates the ingestion components above in order. Accepts
+  `--dry-run`, which runs the full pipeline but logs every People/Email
+  Addresses/Organizations/Affiliations write §6b would make instead of
+  actually making it — for testing the reconciliation logic without
+  polluting the real Notion database. In Phase 1 you run this directly
+  (`python main.py`); Phase 1b adds a GitHub Actions workflow that calls the
+  same entrypoint on a cron schedule instead of you doing it by hand.
 
 ## 5. Gmail authentication
 
@@ -108,14 +138,25 @@ changes — this is purely a deployment change, not a redesign.
   account — this is a personal Gmail account, not a Workspace domain we
   administer).
 - Scope: `gmail.readonly` only. No broader scope is requested in this phase.
-- One-time setup: register an OAuth client in Google Cloud Console (personal
-  project), run the consent flow once locally to obtain a refresh token,
-  then store `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and
-  `GOOGLE_REFRESH_TOKEN` as GitHub Actions encrypted secrets. The workflow
-  never re-runs the interactive consent flow — it only refreshes the access
-  token using the stored refresh token.
-- If the refresh token is ever revoked or expires, the job fails loudly (logs
-  to `run_log` with status=`auth_error`) rather than silently skipping runs.
+- One-time setup: register a **Desktop app** OAuth client in Google Cloud
+  Console (personal project), add yourself as a test user, run the consent
+  flow once locally to obtain a refresh token. **Then click "Publish App"**
+  on the OAuth consent screen (Testing → In production) **without**
+  submitting for verification. This matters: `gmail.readonly` is a
+  *restricted* scope, and Google expires refresh tokens after 7 days for any
+  app still in Testing status, regardless of use — verified via Google's own
+  docs. Publishing (unverified) removes that 7-day limit for a solo
+  developer authorizing only their own account; Google explicitly exempts
+  this case from needing a full verification review. The only visible cost
+  is a one-time "unverified app" click-through on the consent screen, which
+  only you will ever see. Store `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`,
+  and `GOOGLE_REFRESH_TOKEN` in `.env` (Phase 1) / GitHub Actions secrets
+  (Phase 1b). The job never re-runs the interactive consent flow — it only
+  refreshes the access token using the stored refresh token.
+- If the refresh token is ever revoked or expires (unused 6+ months, password
+  change, or manual revocation — not expected in normal use once published),
+  the job fails loudly (logs to `run_log` with status=`auth_error`) rather
+  than silently skipping runs.
 
 ## 6. Classification schema (per message, via Gemini structured output)
 
@@ -128,7 +169,12 @@ Seven independent fields, never collapsed into one score:
 3. `action_required` — boolean.
 4. `keep_in_inbox` — boolean. **Defaults to `true` on any low-confidence or
    failed classification.**
-5. `digest_worthy` — boolean (relevant once a real digest is built later).
+5. `digest_worthy` — boolean. True for routine automated mail that doesn't
+   need individual attention but should still be summarized in aggregate
+   (`message_type` in `{newsletter, marketing, receipt, notification,
+   account_service, automated_other}` and `action_required = false`). This
+   is what `digest.py` (§6c) groups; it's computed once, here, at
+   classification time — not recomputed by the digest step.
 6. `person_org_signal` — optional structured note: does this message suggest
    a new affiliation, role change, or new-person detection worth a human's
    review? (Never auto-applied to Notion — just surfaced.)
@@ -187,21 +233,63 @@ For each message's sender, in order:
    addition, never a merge decision.
 3. **No match at all, and the classifier judges this is a real human (not
    automated)** → auto-create a new Person (`Status = Needs Review`) and a
-   new Email Addresses row (`Confidence = Inferred - needs review`). If the
-   message body has a parseable signature block, the classifier also
-   extracts any Title/Organization mentioned there and creates/matches that
-   Organization plus an Affiliation row (`Confidence = Inferred - needs
-   review`) — same pattern already used for the WICAA/Plan Commission
-   affiliations. A cheap secondary signal: if the sender's email domain
-   matches an existing Organization's Website domain, suggest that
-   affiliation even with no signature. No signature or domain match → the
-   Person is created with just a name and an email, nothing invented.
+   new Email Addresses row (`Confidence = Inferred - needs review`) — name
+   and email only, nothing else invented.
+   **v1.1 fast-follow, not built now:** if the message body has a parseable
+   signature block, extract any Title/Organization mentioned there and
+   create/match that Organization plus an Affiliation row (`Confidence =
+   Inferred - needs review`), same pattern as the WICAA/Plan Commission
+   affiliations; also suggest an affiliation when the sender's email domain
+   matches an existing Organization's Website domain even with no signature.
+   Deferred deliberately — it's the least-tested, most heuristic part of this
+   design, and shipping it alongside the unvalidated core classification
+   loop would make debugging either one harder.
 
 Every record this step writes is visibly marked as unconfirmed
 (`Status`/`Confidence` = `Needs Review`/`Inferred`) — nothing the agent
 writes is ever presented to Notion as settled fact. You review and flip
 these at your own pace; the agent never re-flags something you've already
 confirmed.
+
+## 6c. Daily/weekly digest
+
+Run manually with `python digest.py --period daily` or `--period weekly`.
+Reads every stored message in the window from SQLite and splits it in two:
+
+- **Needs your attention** — anything with `importance` in `{critical,
+  high}` or `action_required = true`. Short bullet list, one line each:
+  sender, subject, and the `reasoning` already stored for it. Nothing new is
+  computed here — it's a recap of judgments already made per-message.
+- **Routine mail** — every stored message with `digest_worthy = true` (§6).
+  This is grouped and counted **deterministically in Python first** — by
+  `message_type`, then by sender/sender-domain within each type — before any
+  LLM involvement, so the actual counts can never be hallucinated. That structured grouping (e.g. `{"newsletter": {"count": 4,
+  "senders": ["x", "y", "z", "a"]}, "notification": {"count": 1, "senders":
+  ["library-noreply@..."], "note": "auto-renew, 4 books"}}`) is then handed
+  to Gemini with an explicit instruction to phrase it as natural prose
+  *using only the numbers and names given* — its job is wording, not
+  counting. Example output:
+
+  > You received 4 newsletters from X, Y, Z, and A, and an auto-renewal
+  > notification from the library for 4 books. Nothing else needed your
+  > attention today.
+
+The digest (both sections) is written to Notion (a dated page, or appended
+section — implementation detail for the plan) and to the notepad log. It is
+**never sent as an email** — this is a read surface, not a Gmail action.
+
+## 6d. Feedback capture
+
+`python feedback.py` lists recent messages from SQLite with a short index,
+lets you pick one, and records a correction: what you'd have classified it
+as instead, plus an optional note. Corrections are stored in their own
+`feedback` table (§7) — kept separate from `messages` because a correction
+is retrospective judgment about a decision, not a new fact about the email
+itself (matches the Memory/Knowledge/Feedback/Traces distinction from the
+broader assistant plan). Nothing acts on feedback automatically in this
+phase — it exists so that before ever building an approval-gated action
+layer, we can look back and actually measure how often the classifier was
+wrong, rather than deciding "it seems fine" from vibes.
 
 ## 7. Data model (local SQLite now, Cloudflare D1 later — identical schema)
 
@@ -240,6 +328,15 @@ CREATE TABLE run_log (
   status TEXT,        -- 'ok' | 'auth_error' | 'partial_error' | 'crashed'
   errors TEXT          -- JSON, nullable
 );
+
+CREATE TABLE feedback (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  gmail_message_id TEXT,     -- references messages.gmail_message_id
+  original_classification TEXT,  -- JSON snapshot of the 7 fields at the time
+  corrected_fields TEXT,     -- JSON, only the fields you actually corrected
+  note TEXT,
+  corrected_at TEXT
+);
 ```
 
 ## 8. Incremental sync & idempotency
@@ -274,13 +371,17 @@ CREATE TABLE run_log (
   time — every real message from someone already in People gets their
   address attached automatically (flagged `Needs Review`, never silently
   trusted), so the database fills in the more this agent actually runs.
-- Signature/domain-based Organization and Affiliation inference (§6b step 3)
-  is necessarily heuristic — it will miss unusual signature formats and
-  occasionally guess wrong. That's fine: it's marked `Inferred - needs
-  review`, never presented as confirmed.
-- This phase has no user-facing action loop — "review" is a Notion page, not
-  an approve/reject interface. That comes later once we're ready to move
-  past observe-only.
+- Signature/domain-based Organization and Affiliation inference is explicitly
+  deferred to v1.1 (§6b step 3), not built in this phase, specifically
+  because it's the most heuristic and least-tested part of this design.
+- Name-based matching (§6b step 2, §4 `people_lookup.py`) only ever writes to
+  Notion above a deliberately high similarity bar; weaker matches are logged
+  but not written, since display names are trivially spoofable and a wrong
+  auto-attach pollutes a real Person record.
+- This phase has no approve/reject action interface — "review" means reading
+  the notepad log/Notion page and, for classification accuracy specifically,
+  `feedback.py` (§6d). Acting on your own review (e.g. archiving) is a later
+  phase.
 
 ## 11. Secrets / configuration
 
@@ -305,13 +406,19 @@ the Google/Gemini/Notion values move there too.
   anonymized-shape examples per category) asserting the schema shape comes
   back correctly — not asserting exact classification content, since that's
   inherently probabilistic.
+- A `digest.py` grouping-logic test with fixture message rows, asserting the
+  deterministic counts/groupings are correct — the part that must never be
+  wrong, since Gemini's phrasing pass is only as trustworthy as the numbers
+  it's given.
 - No automated tests hit live Gmail/Gemini/Notion; those are exercised by
-  actually running `python main.py` against your real mailbox while
+  actually running `python main.py --dry-run` (safe against the real Notion
+  database) and then without `--dry-run` against your real mailbox while
   developing — that's the whole point of testing locally first.
 
 ## 13. What comes after this phase
 
 Not designed yet, intentionally: an approval-gated action layer (e.g.
-archive-after-digest for newsletters), real daily/weekly briefing generation,
-a feedback-capture mechanism to record corrections, and expanding beyond
-personal Gmail. Each is its own future design pass.
+archive-after-digest for newsletters, once `feedback.py` data shows the
+classifier is trustworthy enough), the v1.1 signature/domain-based
+Organization inference deferred from §6b, and expanding beyond personal
+Gmail. Each is its own future design pass.
