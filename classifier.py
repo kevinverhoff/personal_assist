@@ -2,7 +2,7 @@ import json
 
 from google import genai
 
-_MODEL = "gemini-2.5-flash-lite"
+_MODEL = "gemini-flash-lite-latest"
 
 _RESPONSE_SCHEMA = {
     "type": "object",
@@ -16,7 +16,7 @@ _RESPONSE_SCHEMA = {
         "action_required": {"type": "boolean"},
         "keep_in_inbox": {"type": "boolean"},
         "digest_worthy": {"type": "boolean"},
-        "person_org_signal": {"type": ["string", "null"]},
+        "person_org_signal": {"type": "string", "nullable": True},
         "confidence": {"type": "number"},
         "reasoning": {"type": "string"},
     },
