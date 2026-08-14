@@ -59,7 +59,7 @@ def fetch_new_messages(service, last_history_id: str | None) -> tuple[list[dict]
     else:
         list_response = service.users().messages().list(userId="me", q="in:inbox").execute()
         message_ids = [m["id"] for m in list_response.get("messages", [])]
-        new_history_id = service.users().history().list(userId="me", startHistoryId="1").execute()["historyId"]
+        new_history_id = service.users().getProfile(userId="me").execute()["historyId"]
 
     messages = []
     for message_id in message_ids:

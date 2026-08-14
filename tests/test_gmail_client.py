@@ -57,7 +57,7 @@ def test_fetch_new_messages_no_history_id_does_full_inbox_scan():
     service.users().messages().get().execute.return_value = _make_message_payload(
         "msg-1", "First run", "Someone <someone@example.com>"
     )
-    service.users().history().list().execute.return_value = {"historyId": "500"}
+    service.users().getProfile().execute.return_value = {"historyId": "500"}
     messages, new_history_id = fetch_new_messages(service, last_history_id=None)
     assert len(messages) == 1
     assert new_history_id == "500"
