@@ -274,9 +274,15 @@ Reads every stored message in the window from SQLite and splits it in two:
   > notification from the library for 4 books. Nothing else needed your
   > attention today.
 
-The digest (both sections) is written to Notion (a dated page, or appended
-section — implementation detail for the plan) and to the notepad log. It is
-**never sent as an email** — this is a read surface, not a Gmail action.
+The digest (both sections) is written as a new page in a dedicated **Email
+Digests** Notion database (Title, `Period`: Daily/Weekly, `Date`, `Needs
+Attention Count`, `Routine Count` — the two sections go in the page body)
+and appended to the notepad log. Unlike the single, overwritten "Latest Run"
+page (a live status snapshot — full per-message history already lives in
+the notepad log and SQLite), digests get their own row every time, so you
+can browse back through past days/weeks in a real Notion database, sorted
+and filtered like the rest of the knowledge layer. It is **never sent as an
+email** — this is a read surface, not a Gmail action.
 
 ## 6d. Feedback capture
 
@@ -390,7 +396,8 @@ root documents every variable with no real values) — `GOOGLE_CLIENT_ID`,
 `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GEMINI_API_KEY`,
 `NOTION_TOKEN`, `NOTION_PEOPLE_DATA_SOURCE_ID`,
 `NOTION_ORGANIZATIONS_DATA_SOURCE_ID`, `NOTION_AFFILIATIONS_DATA_SOURCE_ID`,
-`NOTION_EMAIL_ADDRESSES_DATA_SOURCE_ID`, `DB_PATH`, `LOG_PATH`.
+`NOTION_EMAIL_ADDRESSES_DATA_SOURCE_ID`, `NOTION_EMAIL_DIGESTS_DATA_SOURCE_ID`,
+`DB_PATH`, `LOG_PATH`.
 
 Phase 1b adds `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`,
 `CLOUDFLARE_API_TOKEN` as GitHub Actions encrypted secrets, at which point
