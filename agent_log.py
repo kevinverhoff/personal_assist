@@ -46,7 +46,9 @@ def update_latest_run_page(client, config, conn, markdown: str) -> str:
     row = conn.execute("SELECT page_id FROM notion_pages WHERE key = 'latest_run'").fetchone()
 
     if row is None:
-        page = client.create_standalone_page("Email Agent — Latest Run", content=markdown)
+        page = client.create_child_page(
+            config.notion_email_agent_parent_page_id, "Email Agent — Latest Run", content=markdown
+        )
         page_id = page["id"]
         conn.execute(
             "INSERT INTO notion_pages (key, page_id) VALUES ('latest_run', ?)", (page_id,)

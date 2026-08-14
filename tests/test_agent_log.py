@@ -30,15 +30,16 @@ def test_append_run_summary_lists_unmatched_senders(tmp_path):
 
 def test_update_latest_run_page_creates_then_reuses_page():
     client = MagicMock()
-    client.create_standalone_page.return_value = {"id": "page-1"}
+    client.create_child_page.return_value = {"id": "page-1"}
     conn = store.init_db(":memory:")
     config = MagicMock()
+    config.notion_email_agent_parent_page_id = "parent-page-id"
 
     page_id_1 = update_latest_run_page(client, config, conn, "## Run 1\nsummary")
     assert page_id_1 == "page-1"
-    client.create_standalone_page.assert_called_once()
+    client.create_child_page.assert_called_once()
 
     page_id_2 = update_latest_run_page(client, config, conn, "## Run 2\nsummary")
     assert page_id_2 == "page-1"
-    client.create_standalone_page.assert_called_once()  # still only called once
+    client.create_child_page.assert_called_once()  # still only called once
     client.update_page.assert_called_once()

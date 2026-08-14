@@ -13,6 +13,7 @@ REQUIRED_ENV_VARS = {
     "NOTION_AFFILIATIONS_DATA_SOURCE_ID": "test-affiliations-ds",
     "NOTION_EMAIL_ADDRESSES_DATA_SOURCE_ID": "test-emails-ds",
     "NOTION_EMAIL_DIGESTS_DATA_SOURCE_ID": "test-digests-ds",
+    "NOTION_EMAIL_AGENT_PARENT_PAGE_ID": "test-parent-page-id",
     "DB_PATH": "./data/test.db",
     "LOG_PATH": "./logs/test.md",
 }

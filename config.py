@@ -16,6 +16,7 @@ _REQUIRED_VARS = [
     "NOTION_AFFILIATIONS_DATA_SOURCE_ID",
     "NOTION_EMAIL_ADDRESSES_DATA_SOURCE_ID",
     "NOTION_EMAIL_DIGESTS_DATA_SOURCE_ID",
+    "NOTION_EMAIL_AGENT_PARENT_PAGE_ID",
     "DB_PATH",
     "LOG_PATH",
 ]
@@ -37,6 +38,7 @@ class Config:
     notion_affiliations_data_source_id: str
     notion_email_addresses_data_source_id: str
     notion_email_digests_data_source_id: str
+    notion_email_agent_parent_page_id: str
     db_path: str
     log_path: str
 
@@ -59,6 +61,7 @@ def load_config() -> Config:
         notion_affiliations_data_source_id=os.environ["NOTION_AFFILIATIONS_DATA_SOURCE_ID"],
         notion_email_addresses_data_source_id=os.environ["NOTION_EMAIL_ADDRESSES_DATA_SOURCE_ID"],
         notion_email_digests_data_source_id=os.environ["NOTION_EMAIL_DIGESTS_DATA_SOURCE_ID"],
+        notion_email_agent_parent_page_id=os.environ["NOTION_EMAIL_AGENT_PARENT_PAGE_ID"],
         db_path=os.environ["DB_PATH"],
         log_path=os.environ["LOG_PATH"],
     )

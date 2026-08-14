@@ -59,11 +59,11 @@ def test_update_page_sends_properties(mock_patch):
 
 
 @patch("notion_client.requests.post")
-def test_create_standalone_page_uses_workspace_parent(mock_post):
-    mock_post.return_value = _mock_response({"id": "standalone-page-1"})
+def test_create_child_page_uses_page_id_parent(mock_post):
+    mock_post.return_value = _mock_response({"id": "child-page-1"})
     client = NotionClient(token="secret_abc")
-    result = client.create_standalone_page("Email Agent — Latest Run", content="hello")
-    assert result["id"] == "standalone-page-1"
+    result = client.create_child_page("parent-page-id", "Email Agent — Latest Run", content="hello")
+    assert result["id"] == "child-page-1"
     payload = mock_post.call_args.kwargs["json"]
-    assert payload["parent"] == {"type": "workspace", "workspace": True}
+    assert payload["parent"] == {"type": "page_id", "page_id": "parent-page-id"}
     assert payload["properties"]["title"]["title"][0]["text"]["content"] == "Email Agent — Latest Run"

@@ -59,9 +59,9 @@ class NotionClient:
         response.raise_for_status()
         return response.json()
 
-    def create_standalone_page(self, title: str, content: str | None = None) -> dict:
+    def create_child_page(self, parent_page_id: str, title: str, content: str | None = None) -> dict:
         payload: dict = {
-            "parent": {"type": "workspace", "workspace": True},
+            "parent": {"type": "page_id", "page_id": parent_page_id},
             "properties": {"title": {"title": [{"text": {"content": title}}]}},
         }
         if content:
