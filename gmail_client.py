@@ -1,4 +1,5 @@
 import base64
+import datetime
 import email.utils
 
 from google.oauth2.credentials import Credentials
@@ -29,6 +30,17 @@ def _decode_body(payload: dict) -> str:
     return ""
 
 
+def _received_at(raw: dict, headers: dict) -> str:
+    internal_date_ms = raw.get("internalDate")
+    if internal_date_ms:
+        dt = datetime.datetime.fromtimestamp(int(internal_date_ms) / 1000, tz=datetime.UTC)
+        return dt.isoformat()
+    parsed = email.utils.parsedate_to_datetime(headers.get("Date", ""))
+    if parsed:
+        return parsed.astimezone(datetime.UTC).isoformat()
+    return ""
+
+
 def _parse_message(raw: dict) -> dict:
     headers = {h["name"]: h["value"] for h in raw["payload"]["headers"]}
     sender_name, sender_email = email.utils.parseaddr(headers.get("From", ""))
@@ -38,7 +50,7 @@ def _parse_message(raw: dict) -> dict:
         "sender_email": sender_email,
         "sender_name": sender_name or sender_email,
         "subject": headers.get("Subject", ""),
-        "received_at": headers.get("Date", ""),
+        "received_at": _received_at(raw, headers),
         "snippet": raw.get("snippet", ""),
         "body": _decode_body(raw["payload"]),
         "headers": headers,

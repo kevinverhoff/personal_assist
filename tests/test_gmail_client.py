@@ -1,13 +1,13 @@
 import base64
 from unittest.mock import MagicMock
 
-from gmail_client import fetch_new_messages
+from gmail_client import fetch_new_messages, _parse_message
 
 
-def _make_message_payload(gmail_id, subject, sender):
+def _make_message_payload(gmail_id, subject, sender, internal_date_ms=None):
     body_text = "Hello, this is the body."
     encoded_body = base64.urlsafe_b64encode(body_text.encode()).decode()
-    return {
+    payload = {
         "id": gmail_id,
         "threadId": f"thread-{gmail_id}",
         "snippet": "Hello, this is the...",
@@ -21,6 +21,9 @@ def _make_message_payload(gmail_id, subject, sender):
             "body": {"data": encoded_body},
         },
     }
+    if internal_date_ms is not None:
+        payload["internalDate"] = str(internal_date_ms)
+    return payload
 
 
 def test_fetch_new_messages_scopes_query_to_inbox():
@@ -49,6 +52,18 @@ def test_fetch_new_messages_parses_message_fields():
     assert messages[0]["sender_email"] == "jane@example.com"
     assert messages[0]["sender_name"] == "Jane Somebody"
     assert "Hello, this is the body." in messages[0]["body"]
+
+
+def test_parse_message_uses_internal_date_when_present():
+    raw = _make_message_payload("msg-1", "Hi", "Someone <someone@example.com>", internal_date_ms=1786000000000)
+    result = _parse_message(raw)
+    assert result["received_at"] == "2026-08-06T07:06:40+00:00"
+
+
+def test_parse_message_falls_back_to_date_header_without_internal_date():
+    raw = _make_message_payload("msg-1", "Hi", "Someone <someone@example.com>")
+    result = _parse_message(raw)
+    assert result["received_at"] == "2026-08-15T11:00:00+00:00"
 
 
 def test_fetch_new_messages_no_history_id_does_full_inbox_scan():
