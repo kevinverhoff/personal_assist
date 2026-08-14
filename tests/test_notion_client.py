@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from notion_client import NotionClient
+from notion_client import NotionClient, _chunk_text
 
 
 def _mock_response(json_data, status_code=200):
@@ -77,6 +77,41 @@ def test_replace_page_content_deletes_old_blocks_then_appends_new(mock_get, mock
     }
     append_payload = mock_patch.call_args.kwargs["json"]
     assert append_payload["children"][0]["paragraph"]["rich_text"][0]["text"]["content"] == "new content"
+
+
+def test_chunk_text_keeps_short_content_as_one_chunk():
+    assert _chunk_text("short content") == ["short content"]
+
+
+def test_chunk_text_splits_content_over_2000_chars():
+    long_line = "x" * 2500
+    chunks = _chunk_text(long_line)
+    assert len(chunks) == 2
+    assert all(len(chunk) <= 2000 for chunk in chunks)
+    assert "".join(chunks) == long_line
+
+
+def test_chunk_text_splits_many_lines_without_breaking_a_line_mid_way():
+    lines = [f"line {i} " + ("y" * 100) for i in range(50)]
+    content = "\n".join(lines)
+    chunks = _chunk_text(content)
+    assert all(len(chunk) <= 2000 for chunk in chunks)
+    # every original line should appear intact somewhere in the chunked output
+    rejoined = "\n".join(chunks)
+    for line in lines:
+        assert line in rejoined
+
+
+@patch("notion_client.requests.post")
+def test_create_page_with_long_content_creates_multiple_blocks(mock_post):
+    mock_post.return_value = _mock_response({"id": "page-1"})
+    client = NotionClient(token="secret_abc")
+    long_content = "\n".join(f"line {i}" * 50 for i in range(100))
+    client.create_page("ds-123", properties={}, content=long_content)
+    payload = mock_post.call_args.kwargs["json"]
+    assert len(payload["children"]) > 1
+    for block in payload["children"]:
+        assert len(block["paragraph"]["rich_text"][0]["text"]["content"]) <= 2000
 
 
 @patch("notion_client.requests.post")

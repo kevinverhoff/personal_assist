@@ -2,6 +2,37 @@ import requests
 
 _BASE_URL = "https://api.notion.com/v1"
 _NOTION_VERSION = "2025-09-03"
+_MAX_RICH_TEXT_LENGTH = 2000
+
+
+def _chunk_text(content: str) -> list[str]:
+    chunks: list[str] = []
+    buffer = ""
+    for line in content.split("\n"):
+        while len(line) > _MAX_RICH_TEXT_LENGTH:
+            chunks.append(line[:_MAX_RICH_TEXT_LENGTH])
+            line = line[_MAX_RICH_TEXT_LENGTH:]
+        candidate = f"{buffer}\n{line}" if buffer else line
+        if len(candidate) > _MAX_RICH_TEXT_LENGTH:
+            if buffer:
+                chunks.append(buffer)
+            buffer = line
+        else:
+            buffer = candidate
+    if buffer:
+        chunks.append(buffer)
+    return chunks or [""]
+
+
+def _paragraph_blocks(content: str) -> list[dict]:
+    return [
+        {
+            "object": "block",
+            "type": "paragraph",
+            "paragraph": {"rich_text": [{"type": "text", "text": {"content": chunk}}]},
+        }
+        for chunk in _chunk_text(content)
+    ]
 
 
 class NotionClient:
@@ -40,13 +71,7 @@ class NotionClient:
             "properties": properties,
         }
         if content:
-            payload["children"] = [
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": content}}]},
-                }
-            ]
+            payload["children"] = _paragraph_blocks(content)
         response = requests.post(f"{_BASE_URL}/pages", headers=self._headers, json=payload)
         response.raise_for_status()
         return response.json()
@@ -78,18 +103,14 @@ class NotionClient:
             response = requests.delete(f"{_BASE_URL}/blocks/{block_id}", headers=self._headers)
             response.raise_for_status()
 
-        response = requests.patch(
-            f"{_BASE_URL}/blocks/{page_id}/children",
-            headers=self._headers,
-            json={"children": [
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": content}}]},
-                }
-            ]},
-        )
-        response.raise_for_status()
+        blocks = _paragraph_blocks(content)
+        for i in range(0, len(blocks), 100):
+            response = requests.patch(
+                f"{_BASE_URL}/blocks/{page_id}/children",
+                headers=self._headers,
+                json={"children": blocks[i:i + 100]},
+            )
+            response.raise_for_status()
 
     def create_child_page(self, parent_page_id: str, title: str, content: str | None = None) -> dict:
         payload: dict = {
@@ -97,13 +118,7 @@ class NotionClient:
             "properties": {"title": {"title": [{"text": {"content": title}}]}},
         }
         if content:
-            payload["children"] = [
-                {
-                    "object": "block",
-                    "type": "paragraph",
-                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": content}}]},
-                }
-            ]
+            payload["children"] = _paragraph_blocks(content)
         response = requests.post(f"{_BASE_URL}/pages", headers=self._headers, json=payload)
         response.raise_for_status()
         return response.json()
