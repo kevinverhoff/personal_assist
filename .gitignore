@@ -147,6 +147,10 @@ activemq-data/
 # SageMath parsed files
 *.sage.py
 
+# Email Intelligence Agent local state
+/data/
+/logs/
+
 # Environments
 .env
 .envrc
