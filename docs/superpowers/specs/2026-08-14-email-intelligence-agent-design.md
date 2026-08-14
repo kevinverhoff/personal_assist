@@ -1,7 +1,11 @@
 # Email Intelligence Agent — Phase 1 (Observe-Only)
 
-Status: approved design, pending implementation plan
+Status: design in progress, pending implementation plan
 Owner: Kevin Verhoff
+
+**Deployment staging:** Phase 1 runs entirely locally (manual invocation,
+local SQLite, local log file). GitHub Actions scheduling and Cloudflare D1
+are deferred until the pipeline is proven locally — see §3 and §7.
 
 ## 1. Goal
 
@@ -35,23 +39,31 @@ design choice below optimizes for recall over automation.
 
 ## 3. Architecture
 
+**Phase 1 (now): local.**
+
 ```
-GitHub Actions (cron, 4-6x/day)
+You, running `python main.py` on your own machine
   └─ Python job (single entrypoint, run to completion each invocation)
        ├─ gmail_client: OAuth2 (gmail.readonly), fetch messages since last
        │    checkpoint via Gmail history API
        ├─ people_lookup: match sender against Notion People/Organizations
        ├─ classifier: one structured Gemini call per message → 7-dimension
        │    judgment
-       ├─ store: upsert results + checkpoint into Cloudflare D1 (via D1's
-       │    REST API — plain HTTP, no Workers/bindings involved)
-       └─ notion_digest: write/update a "Email Agent — Latest Run" Notion
-            page summarizing the run
+       ├─ store: upsert results + checkpoint into a local SQLite file
+       │    (schema-identical to the future D1 tables — see §7)
+       └─ agent_log: append a human-readable run summary to a local
+            "notepad" log file, and update the Notion "Email Agent —
+            Latest Run" page
 ```
 
-All state lives in Cloudflare D1. GitHub Actions runners are ephemeral, so
-nothing is assumed to persist locally between runs — every run reads its
-starting point from D1 and writes its ending point back before exiting.
+All state lives in the local SQLite file (path from `DB_PATH` in `.env`).
+Nothing is scheduled yet — you run it by hand while testing.
+
+**Phase 1b (later, once this is proven): Cloudflare.** Swap the storage layer
+to Cloudflare D1 (same schema, just a different `store.py` backend hitting
+D1's HTTP API instead of local SQLite) and add a GitHub Actions workflow on
+a cron schedule (4-6x/day) to replace manual invocation. No other component
+changes — this is purely a deployment change, not a redesign.
 
 ## 4. Components
 
@@ -74,18 +86,19 @@ starting point from D1 and writes its ending point back before exiting.
   context. Calls Gemini with a `response_schema` for guaranteed structured
   JSON (same pattern as `voice-notes/src/worker.js`). Returns the 7-dimension
   result (§6).
-- `store.py` — thin Cloudflare D1 REST client (`requests`-based). Upserts one
-  row per message (keyed by `gmail_message_id`, so re-processing the same
-  message is harmless), updates `sync_state`, and appends to `run_log`.
-- `notion_digest.py` — after a run completes, writes a run summary to a
-  single Notion page: counts by message type, anything flagged important or
-  action-required with its reasoning, and any senders that read as a real
-  person but didn't match anyone in People.
-- `main.py` — orchestrates the above in order; this is the GitHub Actions
-  entrypoint.
-- `.github/workflows/ingest.yml` — cron schedule (4-6x/day, at off-minute
-  times), sets up Python, installs dependencies, runs `main.py` with secrets
-  injected as environment variables.
+- `store.py` — SQLite client (Python's built-in `sqlite3`, no extra
+  dependency) against the local `DB_PATH` file. Upserts one row per message
+  (keyed by `gmail_message_id`, so re-processing the same message is
+  harmless), updates `sync_state`, and appends to `run_log`. Written so the
+  only thing that changes for the Phase 1b D1 swap is this file.
+- `agent_log.py` — the "notepad" log: appends a timestamped, human-readable
+  section to `LOG_PATH` (plain Markdown) every run — see §6a for format.
+  Also updates the single Notion "Email Agent — Latest Run" page with the
+  same summary, so it's checkable from your phone too.
+- `main.py` — orchestrates the above in order. In Phase 1 you run this
+  directly (`python main.py`); Phase 1b adds a GitHub Actions workflow that
+  calls the same entrypoint on a cron schedule instead of you doing it by
+  hand.
 
 ## 5. Gmail authentication
 
@@ -122,7 +135,35 @@ Seven independent fields, never collapsed into one score:
 Plus a required `reasoning` string (free text) explaining the judgment, so
 every decision is auditable.
 
-## 7. Data model (Cloudflare D1)
+## 6a. The notepad log
+
+Every run appends one section to `LOG_PATH` (default `./logs/agent_log.md`),
+never overwritten — a scrollable history you can open in any editor:
+
+```markdown
+## Run 2026-08-15 07:03
+
+Processed 14 messages (12 matched to People, 2 unmatched senders).
+
+- [human / high / action_required] "Re: Comprehensive Plan draft" — Blaine
+  Rout (brout@cityofgreencastle.com) — Plan Commission is asking for your
+  feedback by Friday. keep_in_inbox=true, confidence=0.91
+- [newsletter / low] "This Week in Greencastle" — noreply@... —
+  List-Unsubscribe present, no action needed. keep_in_inbox=true (not yet
+  archived — Phase 1 never touches Gmail), confidence=0.97
+- ...
+
+**Unmatched senders (real person, not in People DB):**
+- jane.somebody@example.com — "Jane Somebody" — re: "Volunteer schedule"
+
+No errors this run.
+```
+
+Every message gets a line; nothing is summarized away. This is the primary
+way you sanity-check the classifier while testing locally — the Notion page
+mirrors the same summary for when you're away from your machine.
+
+## 7. Data model (local SQLite now, Cloudflare D1 later — identical schema)
 
 ```sql
 CREATE TABLE messages (
@@ -198,23 +239,32 @@ CREATE TABLE run_log (
   an approve/reject interface. That comes later once we're ready to move
   past observe-only.
 
-## 11. Secrets / configuration (GitHub Actions encrypted secrets)
+## 11. Secrets / configuration
 
-`GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`,
-`GEMINI_API_KEY`, `NOTION_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`,
-`CLOUDFLARE_D1_DATABASE_ID`, `CLOUDFLARE_API_TOKEN`.
+Phase 1: a local `.env` file (never committed; `env.example` in the repo
+root documents every variable with no real values) — `GOOGLE_CLIENT_ID`,
+`GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`, `GEMINI_API_KEY`,
+`NOTION_TOKEN`, `NOTION_PEOPLE_DATA_SOURCE_ID`,
+`NOTION_ORGANIZATIONS_DATA_SOURCE_ID`, `NOTION_AFFILIATIONS_DATA_SOURCE_ID`,
+`DB_PATH`, `LOG_PATH`.
+
+Phase 1b adds `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_D1_DATABASE_ID`,
+`CLOUDFLARE_API_TOKEN` as GitHub Actions encrypted secrets, at which point
+the Google/Gemini/Notion values move there too.
 
 ## 12. Testing strategy
 
-- Unit tests for `signals.py` (pure functions, easy to test) and the D1
-  upsert logic (against a local/in-memory SQLite standing in for D1's SQL
-  dialect, which is SQLite-compatible).
+- Unit tests for `signals.py` (pure functions, easy to test) and the
+  `store.py` upsert logic against a real local SQLite file (in-memory
+  `sqlite3` for speed) — this doubles as the future D1 compatibility check,
+  since D1's SQL dialect is SQLite.
 - A `classifier.py` test using recorded fixture messages (a handful of real
   anonymized-shape examples per category) asserting the schema shape comes
   back correctly — not asserting exact classification content, since that's
   inherently probabilistic.
-- No live Gmail/Gemini/D1 calls in CI; those are exercised manually against
-  a real (test) mailbox before the first scheduled run goes live.
+- No automated tests hit live Gmail/Gemini/Notion; those are exercised by
+  actually running `python main.py` against your real mailbox while
+  developing — that's the whole point of testing locally first.
 
 ## 13. What comes after this phase
 
