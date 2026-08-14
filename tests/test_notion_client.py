@@ -58,6 +58,27 @@ def test_update_page_sends_properties(mock_patch):
     assert payload["properties"]["Status"]["select"]["name"] == "Needs Review"
 
 
+@patch("notion_client.requests.patch")
+@patch("notion_client.requests.delete")
+@patch("notion_client.requests.get")
+def test_replace_page_content_deletes_old_blocks_then_appends_new(mock_get, mock_delete, mock_patch):
+    mock_get.return_value = _mock_response({"results": [{"id": "block-1"}, {"id": "block-2"}], "has_more": False})
+    mock_delete.return_value = _mock_response({})
+    mock_patch.return_value = _mock_response({})
+
+    client = NotionClient(token="secret_abc")
+    client.replace_page_content("page-1", "new content")
+
+    assert mock_delete.call_count == 2
+    deleted_urls = {call.args[0] for call in mock_delete.call_args_list}
+    assert deleted_urls == {
+        "https://api.notion.com/v1/blocks/block-1",
+        "https://api.notion.com/v1/blocks/block-2",
+    }
+    append_payload = mock_patch.call_args.kwargs["json"]
+    assert append_payload["children"][0]["paragraph"]["rich_text"][0]["text"]["content"] == "new content"
+
+
 @patch("notion_client.requests.post")
 def test_create_child_page_uses_page_id_parent(mock_post):
     mock_post.return_value = _mock_response({"id": "child-page-1"})

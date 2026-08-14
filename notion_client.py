@@ -59,6 +59,38 @@ class NotionClient:
         response.raise_for_status()
         return response.json()
 
+    def replace_page_content(self, page_id: str, content: str) -> None:
+        cursor = None
+        block_ids: list[str] = []
+        while True:
+            params = {"start_cursor": cursor} if cursor else {}
+            response = requests.get(
+                f"{_BASE_URL}/blocks/{page_id}/children", headers=self._headers, params=params
+            )
+            response.raise_for_status()
+            data = response.json()
+            block_ids.extend(block["id"] for block in data["results"])
+            if not data.get("has_more"):
+                break
+            cursor = data.get("next_cursor")
+
+        for block_id in block_ids:
+            response = requests.delete(f"{_BASE_URL}/blocks/{block_id}", headers=self._headers)
+            response.raise_for_status()
+
+        response = requests.patch(
+            f"{_BASE_URL}/blocks/{page_id}/children",
+            headers=self._headers,
+            json={"children": [
+                {
+                    "object": "block",
+                    "type": "paragraph",
+                    "paragraph": {"rich_text": [{"type": "text", "text": {"content": content}}]},
+                }
+            ]},
+        )
+        response.raise_for_status()
+
     def create_child_page(self, parent_page_id: str, title: str, content: str | None = None) -> dict:
         payload: dict = {
             "parent": {"type": "page_id", "page_id": parent_page_id},

@@ -57,5 +57,5 @@ def update_latest_run_page(client, config, conn, markdown: str) -> str:
         return page_id
 
     page_id = row["page_id"]
-    client.update_page(page_id, properties=None)
+    client.replace_page_content(page_id, markdown)
     return page_id
