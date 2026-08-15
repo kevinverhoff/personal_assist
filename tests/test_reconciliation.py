@@ -47,6 +47,35 @@ def test_no_match_and_human_creates_person_and_email():
     assert client.create_page.call_count == 2
 
 
+def test_same_unknown_sender_twice_in_one_batch_does_not_duplicate():
+    # Reproduces the real bug: a batch with two messages from the same new
+    # sender must only create one Person + one Email, not two of each,
+    # because reconcile_sender updates the cache in place after writing.
+    cache = PeopleCache(people_by_id={}, email_to_person_id={})
+    client = MagicMock()
+    client.create_page.side_effect = [{"id": "person-new"}, {"id": "email-new"}]
+
+    first = reconcile_sender(client, _config(), cache, "jeanne@example.com", "Jeanne Servais", True, dry_run=False)
+    second = reconcile_sender(client, _config(), cache, "jeanne@example.com", "Jeanne Servais", True, dry_run=False)
+
+    assert first == {"action": "created_person", "person_id": "person-new", "logged_only": False}
+    assert second == {"action": "known", "person_id": "person-new"}
+    assert client.create_page.call_count == 2  # only the first call wrote anything
+
+
+def test_name_match_attach_updates_cache_so_repeat_sender_is_known():
+    cache = PeopleCache(people_by_id={"p1": "Blaine Rout"}, email_to_person_id={})
+    client = MagicMock()
+    client.create_page.return_value = {"id": "email-page-1"}
+
+    first = reconcile_sender(client, _config(), cache, "blaine.personal@gmail.com", "Blaine Rout", True, dry_run=False)
+    second = reconcile_sender(client, _config(), cache, "blaine.personal@gmail.com", "Blaine Rout", True, dry_run=False)
+
+    assert first == {"action": "attached_email", "person_id": "p1", "logged_only": False}
+    assert second == {"action": "known", "person_id": "p1"}
+    client.create_page.assert_called_once()  # only the first call wrote anything
+
+
 def test_no_match_and_not_human_takes_no_action():
     cache = PeopleCache(people_by_id={}, email_to_person_id={})
     client = MagicMock()

@@ -37,6 +37,12 @@ class PeopleCache:
 
         return cls(people_by_id=people_by_id, email_to_person_id=email_to_person_id)
 
+    def add_person(self, person_id: str, name: str) -> None:
+        self.people_by_id[person_id] = name
+
+    def add_email(self, email: str, person_id: str) -> None:
+        self.email_to_person_id[email.strip().lower()] = person_id
+
     def match_by_email(self, email: str) -> dict | None:
         person_id = self.email_to_person_id.get(email.strip().lower())
         if not person_id:

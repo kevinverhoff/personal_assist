@@ -56,3 +56,20 @@ def test_match_by_name_weak_match_returns_none():
     people = [{"id": "person-1", "properties": {"Name": {"title": [{"plain_text": "Blaine Rout"}]}}}]
     cache = PeopleCache.load(_fake_client(people, []), _fake_config())
     assert cache.match_by_name("Someone Completely Different") is None
+
+
+def test_add_person_makes_them_immediately_matchable_by_name():
+    cache = PeopleCache.load(_fake_client([], []), _fake_config())
+    assert cache.match_by_name("Jeanne Servais") is None
+    cache.add_person("person-new", "Jeanne Servais")
+    match = cache.match_by_name("Jeanne Servais")
+    assert match["person_id"] == "person-new"
+
+
+def test_add_email_makes_it_immediately_matchable_by_email():
+    cache = PeopleCache.load(_fake_client([], []), _fake_config())
+    assert cache.match_by_email("jeanne@example.com") is None
+    cache.add_person("person-new", "Jeanne Servais")
+    cache.add_email("jeanne@example.com", "person-new")
+    match = cache.match_by_email("jeanne@example.com")
+    assert match == {"person_id": "person-new", "person_name": "Jeanne Servais"}

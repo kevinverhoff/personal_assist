@@ -28,6 +28,7 @@ def reconcile_sender(client, config, cache, sender_email: str, sender_name: str,
             config.notion_email_addresses_data_source_id,
             _email_page_properties(sender_email, name_match["person_id"]),
         )
+        cache.add_email(sender_email, name_match["person_id"])
         return {"action": "attached_email", "person_id": name_match["person_id"], "logged_only": False}
 
     if not is_human:
@@ -41,4 +42,6 @@ def reconcile_sender(client, config, cache, sender_email: str, sender_name: str,
         config.notion_email_addresses_data_source_id,
         _email_page_properties(sender_email, person_page["id"]),
     )
+    cache.add_person(person_page["id"], sender_name)
+    cache.add_email(sender_email, person_page["id"])
     return {"action": "created_person", "person_id": person_page["id"], "logged_only": False}
