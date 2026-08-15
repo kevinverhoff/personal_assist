@@ -49,6 +49,16 @@ def test_create_page_sends_parent_and_properties(mock_post):
 
 
 @patch("notion_client.requests.patch")
+def test_archive_page_sends_archived_true(mock_patch):
+    mock_patch.return_value = _mock_response({"id": "page-1", "archived": True})
+    client = NotionClient(token="secret_abc")
+    result = client.archive_page("page-1")
+    assert result["archived"] is True
+    payload = mock_patch.call_args.kwargs["json"]
+    assert payload == {"archived": True}
+
+
+@patch("notion_client.requests.patch")
 def test_update_page_sends_properties(mock_patch):
     mock_patch.return_value = _mock_response({"id": "page-1", "properties": {}})
     client = NotionClient(token="secret_abc")

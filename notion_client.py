@@ -76,6 +76,13 @@ class NotionClient:
         response.raise_for_status()
         return response.json()
 
+    def archive_page(self, page_id: str) -> dict:
+        response = requests.patch(
+            f"{_BASE_URL}/pages/{page_id}", headers=self._headers, json={"archived": True}
+        )
+        response.raise_for_status()
+        return response.json()
+
     def update_page(self, page_id: str, properties: dict | None = None) -> dict:
         payload: dict = {}
         if properties:
