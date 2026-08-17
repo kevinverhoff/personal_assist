@@ -19,8 +19,8 @@ the task-by-task build record is in
 
 ## Where things stand
 
-**Phase 1 is fully built and mostly verified against real Gmail, Gemini,
-and Notion data** — not just unit tests. 91 automated tests pass.
+**Phase 1 is fully built and verified against real Gmail, Gemini, and
+Notion data** — not just unit tests. 105 automated tests pass.
 
 What exists today:
 
@@ -62,27 +62,25 @@ What exists today:
   Cloudflare D1 later).
 - `agent_log.py` — a local "notepad" log plus a single Notion "Latest Run"
   status page, updated in place each run.
-- `digest.py` — `python digest.py --period daily|weekly` groups routine
-  mail deterministically (flagging how many of each type were archived vs.
-  kept) and has Gemini phrase (never count) a summary, written to a
-  dedicated Notion "Email Digests" database.
+- `digest.py` — `python digest.py --period daily|weekly|current` groups
+  routine mail deterministically (flagging how many of each type were
+  archived vs. kept) and has Gemini phrase (never count) a summary,
+  written to a dedicated Notion "Email Digests" database. `daily`/`weekly`
+  are rolling time windows over everything received in that span,
+  regardless of which run processed it. `current` is different: it's
+  scoped to only the single most recent `main.py` run (via a `run_at`
+  tag stored per message), and every known/attention line is annotated
+  with exactly what happened to that message — `archived`, `labeled VIP`,
+  `labeled Known Contact`, or `kept in inbox` — so it reads as "here's
+  what just happened to my inbox," not a rolling summary.
 - `feedback.py` — a CLI to correct a stored classification, so accuracy
   can eventually be measured rather than eyeballed.
 
 Everything currently runs **locally, by hand** — no scheduling yet, no
 Cloudflare. That's intentional (see Phase 1b below).
 
-### In progress
-
-Archiving and Gmail labeling (VIP/Known Contact) are both implemented and
-unit-tested, but **neither has been verified against a real Gmail call
-yet** — both need a fresh OAuth consent (the `gmail.modify` scope is new;
-existing refresh tokens don't have it). Re-run `python gmail_auth_setup.py`,
-then a real run can be verified end to end.
-
 ### Next steps
 
-- **Verify real archiving and labeling** (above) once re-consent is done.
 - **Phase 1b**: move scheduling to GitHub Actions (cron, 4-6x/day) and
   storage to Cloudflare D1, once the local pipeline has run for a while
   and feels trustworthy. No other component changes expected — the store
@@ -145,7 +143,7 @@ Agent" parent page.
    python main.py --dry-run     # logs what would happen, writes nothing to Notion/Gmail
    python main.py               # the real thing — archives routine mail by default
    python main.py --no-archive  # real Notion writes, but never archives anything
-   python digest.py --period daily    # or --period weekly
+   python digest.py --period daily    # or --period weekly / --period current
    python feedback.py           # correct a recent classification
    ```
 
