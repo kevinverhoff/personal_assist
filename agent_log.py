@@ -1,5 +1,7 @@
 import os
 
+from prioritization import group_messages, format_compact_line
+
 _NOTION_PAGES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS notion_pages (
   key TEXT PRIMARY KEY,
@@ -8,28 +10,41 @@ CREATE TABLE IF NOT EXISTS notion_pages (
 """
 
 
-def _format_result_line(result: dict) -> str:
-    flags = f"[{result['message_type']} / {result['importance']}"
-    if result.get("action_required"):
-        flags += " / action_required"
-    flags += "]"
-    return (
-        f"- {flags} \"{result['subject']}\" — {result['sender_name']} "
-        f"({result['sender_email']}) — {result['reasoning']}. "
-        f"keep_in_inbox={result['keep_in_inbox']}, confidence={result['confidence']}"
-    )
+def _append_group(lines: list[str], title: str, messages: list[dict]) -> None:
+    lines.append(f"### {title} ({len(messages)})")
+    if messages:
+        lines.extend(format_compact_line(m) for m in messages)
+    else:
+        lines.append("None.")
+    lines.append("")
 
 
-def append_run_summary(log_path: str, run_at: str, results: list[dict], unmatched: list[dict], errors: list[str]) -> str:
-    lines = [f"## Run {run_at}", "", f"Processed {len(results)} messages ({len(unmatched)} unmatched senders).", ""]
-    for result in results:
-        lines.append(_format_result_line(result))
+def append_run_summary(
+    log_path: str, run_at: str, results: list[dict], unmatched: list[dict], errors: list[str],
+    archived: list[dict] | None = None,
+) -> str:
+    archived = archived or []
+    groups = group_messages(results)
+
+    lines = [
+        f"## Run {run_at}", "",
+        f"Processed {len(results)} messages "
+        f"({len(unmatched)} unmatched senders, {len(archived)} archived).",
+        "",
+    ]
+    _append_group(lines, "From people you know", groups["known"])
+    _append_group(lines, "May need your attention", groups["attention"])
+    _append_group(lines, "Everything else", groups["rest"])
+
+    if archived:
+        _append_group(lines, "Archived this run", archived)
+
     if unmatched:
-        lines.append("")
         lines.append("**Unmatched senders (real person, not in People DB):**")
         for person in unmatched:
             lines.append(f"- {person['sender_email']} — \"{person['sender_name']}\" — re: \"{person['subject']}\"")
-    lines.append("")
+        lines.append("")
+
     lines.append("No errors this run." if not errors else f"Errors: {errors}")
     lines.append("")
     section = "\n".join(lines)
