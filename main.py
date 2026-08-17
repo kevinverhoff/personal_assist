@@ -55,9 +55,11 @@ def run(dry_run: bool = False, archive: bool = True) -> dict:
             gemini_client, message["subject"], message["snippet"], message["body"], sig, person_match
         )
 
+        label_applied = None
         if not dry_run and person_match:
-            label_id = vip_label_id if person_match.get("importance") == "VIP" else known_label_id
-            apply_label(gmail_service, message["gmail_message_id"], label_id)
+            is_vip = person_match.get("importance") == "VIP"
+            label_applied = VIP_LABEL_NAME if is_vip else KNOWN_CONTACT_LABEL_NAME
+            apply_label(gmail_service, message["gmail_message_id"], vip_label_id if is_vip else known_label_id)
 
         is_human = classification["message_type"] == "human"
         reconciliation_result = reconcile_sender(
@@ -90,6 +92,8 @@ def run(dry_run: bool = False, archive: bool = True) -> dict:
             "matched_person_id": person_match["person_id"] if person_match else None,
             "matched_org_ids": None,
             "processed_at": datetime.datetime.now(datetime.UTC).isoformat(),
+            "run_at": run_at,
+            "label_applied": label_applied,
         }
         if not dry_run:
             store.upsert_message(conn, row)

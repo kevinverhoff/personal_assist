@@ -229,6 +229,10 @@ def test_run_applies_vip_label_for_vip_known_sender(
     main.run(dry_run=False, archive=True)
 
     mock_apply_label.assert_called_once_with(mock_gmail_service.return_value, "msg-1", "vip-label-id")
+    conn = store.init_db(str(tmp_path / "test.db"))
+    row = conn.execute("SELECT run_at, label_applied FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["label_applied"] == "VIP"
+    assert row["run_at"] == conn.execute("SELECT last_run_at FROM sync_state").fetchone()[0]
 
 
 @_patch_main
@@ -254,3 +258,31 @@ def test_run_applies_known_contact_label_for_non_vip_known_sender(
     main.run(dry_run=False, archive=True)
 
     mock_apply_label.assert_called_once_with(mock_gmail_service.return_value, "msg-1", "known-label-id")
+    conn = store.init_db(str(tmp_path / "test.db"))
+    row = conn.execute("SELECT label_applied FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["label_applied"] == "Known Contact"
+
+
+@_patch_main
+def test_run_stores_no_label_applied_for_unmatched_sender(
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
+):
+    _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
+    mock_fetch.return_value = ([_one_message()], "history-2")
+    mock_classify.return_value = {
+        "message_type": "human", "importance": "high", "action_required": True,
+        "keep_in_inbox": True, "digest_worthy": False, "person_org_signal": None,
+        "confidence": 0.9, "reasoning": "unknown sender",
+    }
+    mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
+    mock_reconcile.return_value = {"action": "no_action"}
+
+    import main
+    main.run(dry_run=False)
+
+    conn = store.init_db(str(tmp_path / "test.db"))
+    row = conn.execute("SELECT label_applied FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["label_applied"] is None
