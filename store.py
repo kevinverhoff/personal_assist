@@ -61,11 +61,19 @@ _MESSAGE_COLUMNS = [
 ]
 
 
+_MIGRATION_COLUMNS = {
+    "archived": "INTEGER DEFAULT 0",
+    "archived_at": "TEXT",
+    "run_at": "TEXT",
+    "label_applied": "TEXT",
+}
+
+
 def _migrate_messages_table(conn: sqlite3.Connection) -> None:
     existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-    for column in ("run_at", "label_applied"):
+    for column, column_type in _MIGRATION_COLUMNS.items():
         if column not in existing_columns:
-            conn.execute(f"ALTER TABLE messages ADD COLUMN {column} TEXT")
+            conn.execute(f"ALTER TABLE messages ADD COLUMN {column} {column_type}")
     conn.commit()
 
 

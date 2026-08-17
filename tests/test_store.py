@@ -123,16 +123,15 @@ def test_new_messages_default_to_not_archived():
 
 def test_init_db_adds_new_columns_to_legacy_messages_table(tmp_path):
     # Reproduces the real scenario: an already-accumulated database file
-    # created before run_at/label_applied existed. Migration must add the
-    # columns without touching existing rows or requiring a rebuild.
+    # created before archived/archived_at/run_at/label_applied existed.
+    # Migration must add all of them without touching existing rows or
+    # requiring a rebuild.
     db_path = str(tmp_path / "legacy.db")
     legacy_conn = sqlite3.connect(db_path)
     legacy_conn.execute("""
         CREATE TABLE messages (
           gmail_message_id TEXT PRIMARY KEY,
-          subject TEXT,
-          archived INTEGER DEFAULT 0,
-          archived_at TEXT
+          subject TEXT
         )
     """)
     legacy_conn.execute("INSERT INTO messages (gmail_message_id, subject) VALUES ('msg-1', 'old subject')")
@@ -141,10 +140,13 @@ def test_init_db_adds_new_columns_to_legacy_messages_table(tmp_path):
 
     conn = store.init_db(db_path)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-    assert "run_at" in columns
-    assert "label_applied" in columns
-    row = conn.execute("SELECT subject, run_at, label_applied FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert {"archived", "archived_at", "run_at", "label_applied"} <= columns
+    row = conn.execute(
+        "SELECT subject, archived, archived_at, run_at, label_applied FROM messages WHERE gmail_message_id = 'msg-1'"
+    ).fetchone()
     assert row["subject"] == "old subject"
+    assert row["archived"] == 0  # SQLite backfills ADD COLUMN ... DEFAULT 0 onto existing rows
+    assert row["archived_at"] is None
     assert row["run_at"] is None
     assert row["label_applied"] is None
 
