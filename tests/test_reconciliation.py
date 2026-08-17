@@ -12,7 +12,7 @@ def _config():
 
 
 def test_known_sender_returns_known_no_writes():
-    cache = PeopleCache(people_by_id={"p1": "Blaine Rout"}, email_to_person_id={"brout@cityofgreencastle.com": "p1"})
+    cache = PeopleCache(people_by_id={"p1": {"name": "Blaine Rout", "importance": None}}, email_to_person_id={"brout@cityofgreencastle.com": "p1"})
     client = MagicMock()
     result = reconcile_sender(client, _config(), cache, "brout@cityofgreencastle.com", "Blaine Rout", True, dry_run=False)
     assert result == {"action": "known", "person_id": "p1"}
@@ -20,7 +20,7 @@ def test_known_sender_returns_known_no_writes():
 
 
 def test_name_match_attaches_email_when_not_dry_run():
-    cache = PeopleCache(people_by_id={"p1": "Blaine Rout"}, email_to_person_id={})
+    cache = PeopleCache(people_by_id={"p1": {"name": "Blaine Rout", "importance": None}}, email_to_person_id={})
     client = MagicMock()
     client.create_page.return_value = {"id": "email-page-1"}
     result = reconcile_sender(client, _config(), cache, "blaine.personal@gmail.com", "Blaine Rout", True, dry_run=False)
@@ -31,7 +31,7 @@ def test_name_match_attaches_email_when_not_dry_run():
 
 
 def test_name_match_dry_run_does_not_call_notion():
-    cache = PeopleCache(people_by_id={"p1": "Blaine Rout"}, email_to_person_id={})
+    cache = PeopleCache(people_by_id={"p1": {"name": "Blaine Rout", "importance": None}}, email_to_person_id={})
     client = MagicMock()
     result = reconcile_sender(client, _config(), cache, "blaine.personal@gmail.com", "Blaine Rout", True, dry_run=True)
     assert result == {"action": "attached_email", "person_id": "p1", "logged_only": True}
@@ -64,7 +64,7 @@ def test_same_unknown_sender_twice_in_one_batch_does_not_duplicate():
 
 
 def test_name_match_attach_updates_cache_so_repeat_sender_is_known():
-    cache = PeopleCache(people_by_id={"p1": "Blaine Rout"}, email_to_person_id={})
+    cache = PeopleCache(people_by_id={"p1": {"name": "Blaine Rout", "importance": None}}, email_to_person_id={})
     client = MagicMock()
     client.create_page.return_value = {"id": "email-page-1"}
 

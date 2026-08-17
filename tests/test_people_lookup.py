@@ -36,7 +36,33 @@ def test_match_by_email_exact():
     }}]
     cache = PeopleCache.load(_fake_client(people, emails), _fake_config())
     match = cache.match_by_email("brout@cityofgreencastle.com")
-    assert match == {"person_id": "person-1", "person_name": "Blaine Rout"}
+    assert match == {"person_id": "person-1", "person_name": "Blaine Rout", "importance": None}
+
+
+def test_match_by_email_returns_vip_importance():
+    people = [{"id": "person-1", "properties": {
+        "Name": {"title": [{"plain_text": "Carole Barr"}]},
+        "Importance": {"select": {"name": "VIP"}},
+    }}]
+    emails = [{"properties": {
+        "Email": {"email": "cbarr@wicaa.org"},
+        "Person": {"relation": [{"id": "person-1"}]},
+    }}]
+    cache = PeopleCache.load(_fake_client(people, emails), _fake_config())
+    match = cache.match_by_email("cbarr@wicaa.org")
+    assert match["importance"] == "VIP"
+    assert cache.is_vip("person-1") is True
+
+
+def test_is_vip_false_for_standard_person():
+    people = [{"id": "person-1", "properties": {"Name": {"title": [{"plain_text": "Blaine Rout"}]}}}]
+    cache = PeopleCache.load(_fake_client(people, []), _fake_config())
+    assert cache.is_vip("person-1") is False
+
+
+def test_is_vip_false_for_unknown_person():
+    cache = PeopleCache.load(_fake_client([], []), _fake_config())
+    assert cache.is_vip("nonexistent") is False
 
 
 def test_match_by_email_no_match_returns_none():
@@ -72,4 +98,4 @@ def test_add_email_makes_it_immediately_matchable_by_email():
     cache.add_person("person-new", "Jeanne Servais")
     cache.add_email("jeanne@example.com", "person-new")
     match = cache.match_by_email("jeanne@example.com")
-    assert match == {"person_id": "person-new", "person_name": "Jeanne Servais"}
+    assert match == {"person_id": "person-new", "person_name": "Jeanne Servais", "importance": None}
