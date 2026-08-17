@@ -4,6 +4,7 @@ import email.utils
 
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
 
 # gmail.modify is a superset of read access plus label changes (archive is
 # implemented as removing the INBOX label) -- it does NOT allow permanent
@@ -87,7 +88,16 @@ def fetch_new_messages(service, last_history_id: str | None) -> tuple[list[dict]
 
     messages = []
     for message_id in message_ids:
-        raw = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+        try:
+            raw = service.users().messages().get(userId="me", id=message_id, format="full").execute()
+        except HttpError as error:
+            if error.resp.status == 404:
+                # history.list can reference a message that's gone by the
+                # time we fetch it (auto-deleted spam, moved out of Gmail
+                # entirely) -- skip it rather than losing the whole batch
+                # and getting stuck retrying the same dead message forever.
+                continue
+            raise
         messages.append(_parse_message(raw))
 
     return messages, new_history_id

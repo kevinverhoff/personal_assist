@@ -1,7 +1,19 @@
 import base64
 from unittest.mock import MagicMock
 
+from googleapiclient.errors import HttpError
+
 from gmail_client import fetch_new_messages, _parse_message, archive_message, get_or_create_label, apply_label
+
+
+class _FakeResp:
+    def __init__(self, status):
+        self.status = status
+        self.reason = "Not Found"
+
+
+def _not_found_error():
+    return HttpError(_FakeResp(404), b'{"error": {"code": 404, "message": "Requested entity was not found."}}')
 
 
 def _make_message_payload(gmail_id, subject, sender, internal_date_ms=None):
@@ -88,6 +100,31 @@ def test_fetch_new_messages_paginates_through_history():
         if call.kwargs.get("pageToken") == "page2"
     ]
     assert len(paged_calls) == 1
+
+
+def test_fetch_new_messages_skips_message_deleted_before_fetch():
+    # Reproduces the real bug: history.list can reference a message that no
+    # longer exists by the time we call messages.get (auto-deleted spam,
+    # moved out of Gmail entirely, etc). A single 404 must not crash the
+    # whole run and strand new_history_id -- the other messages in the same
+    # batch still need to come through, and the batch's real historyId must
+    # still be returned so sync_state advances past the bad message.
+    service = MagicMock()
+    service.users().history().list().execute.return_value = {
+        "history": [{"messagesAdded": [
+            {"message": {"id": "msg-deleted"}},
+            {"message": {"id": "msg-1"}},
+        ]}],
+        "historyId": "1001",
+    }
+    service.users().messages().get().execute.side_effect = [
+        _not_found_error(),
+        _make_message_payload("msg-1", "Hello there", "Jane Somebody <jane@example.com>"),
+    ]
+    messages, new_history_id = fetch_new_messages(service, last_history_id="1000")
+    assert new_history_id == "1001"
+    assert len(messages) == 1
+    assert messages[0]["gmail_message_id"] == "msg-1"
 
 
 def test_archive_message_removes_inbox_label_only():
