@@ -1,9 +1,10 @@
 import argparse
 import datetime
 
+from archiving import should_archive
 from classifier import classify_message, make_client
 from config import load_config
-from gmail_client import build_service, fetch_new_messages
+from gmail_client import build_service, fetch_new_messages, archive_message
 from notion_client import NotionClient
 from people_lookup import PeopleCache
 from reconciliation import reconcile_sender
@@ -12,7 +13,7 @@ from signals import extract_signals
 import store
 
 
-def run(dry_run: bool = False) -> dict:
+def run(dry_run: bool = False, archive: bool = True) -> dict:
     config = load_config()
     conn = store.init_db(config.db_path)
     run_at = datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%d %H:%M")
@@ -30,7 +31,7 @@ def run(dry_run: bool = False) -> dict:
     people_cache = PeopleCache.load(notion_client, config)
     gemini_client = make_client(config.gemini_api_key)
 
-    results, unmatched, errors = [], [], []
+    results, unmatched, errors, archived = [], [], [], []
 
     for message in messages:
         sig = extract_signals(message["headers"], message["sender_email"])
@@ -73,9 +74,16 @@ def run(dry_run: bool = False) -> dict:
         }
         if not dry_run:
             store.upsert_message(conn, row)
-        results.append({**row, "action_required": bool(row["action_required"]), "keep_in_inbox": bool(row["keep_in_inbox"])})
+        result = {**row, "action_required": bool(row["action_required"]), "keep_in_inbox": bool(row["keep_in_inbox"])}
+        results.append(result)
 
-    markdown = append_run_summary(config.log_path, run_at, results, unmatched, errors)
+        if archive and not dry_run and should_archive(classification, person_match):
+            archive_message(gmail_service, message["gmail_message_id"])
+            archived_at = datetime.datetime.now(datetime.UTC).isoformat()
+            store.mark_archived(conn, message["gmail_message_id"], archived_at)
+            archived.append(result)
+
+    markdown = append_run_summary(config.log_path, run_at, results, unmatched, errors, archived=archived)
     if not dry_run:
         update_latest_run_page(notion_client, config, conn, markdown)
         store.set_sync_state(conn, new_history_id, run_at)
@@ -87,6 +95,7 @@ def run(dry_run: bool = False) -> dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--no-archive", action="store_true", help="Classify and store as usual, but never archive anything.")
     args = parser.parse_args()
-    outcome = run(dry_run=args.dry_run)
+    outcome = run(dry_run=args.dry_run, archive=not args.no_archive)
     print(outcome)
