@@ -6,7 +6,8 @@ This repo is the first real piece of that: an **Email Intelligence Agent**
 for personal Gmail. It reads your inbox, classifies each message along
 several independent dimensions, cross-references the sender against a
 Notion knowledge base of people/organizations you actually know, prioritizes
-messages from people you know, and archives routine mail it's confident
+messages from people you know, labels known senders right in Gmail (red
+"VIP", yellow "Known Contact"), and archives routine mail it's confident
 about — while never touching anything from someone in your People database,
 and never deleting anything (archived mail just leaves the inbox; it's
 still fully there in All Mail, one click to undo).
@@ -19,7 +20,7 @@ the task-by-task build record is in
 ## Where things stand
 
 **Phase 1 is fully built and mostly verified against real Gmail, Gemini,
-and Notion data** — not just unit tests. 82 automated tests pass.
+and Notion data** — not just unit tests. 91 automated tests pass.
 
 What exists today:
 
@@ -47,6 +48,11 @@ What exists today:
   (high/critical importance or action-required), then everything else.
   Used by both the run summary and the digest, formatted compactly
   (`[type] "subject" — sender (email)`).
+- `main.py` — applies a real Gmail label to every message from a sender
+  matched in your People database: red **VIP** for VIP-importance people,
+  yellow **Known Contact** for everyone else. (Gmail's colored "stars" are
+  a Gmail-UI-only feature, not exposed via the API at all — labels are the
+  closest API-controllable equivalent.) Skipped entirely on `--dry-run`.
 - `archiving.py` / `main.py` — archives a message (removes the INBOX
   label, never deletes) only when it's routine (`digest_worthy`),
   high-confidence (≥ 0.9), **and** the sender does not match anyone in
@@ -57,8 +63,9 @@ What exists today:
 - `agent_log.py` — a local "notepad" log plus a single Notion "Latest Run"
   status page, updated in place each run.
 - `digest.py` — `python digest.py --period daily|weekly` groups routine
-  mail deterministically and has Gemini phrase (never count) a summary,
-  written to a dedicated Notion "Email Digests" database.
+  mail deterministically (flagging how many of each type were archived vs.
+  kept) and has Gemini phrase (never count) a summary, written to a
+  dedicated Notion "Email Digests" database.
 - `feedback.py` — a CLI to correct a stored classification, so accuracy
   can eventually be measured rather than eyeballed.
 
@@ -67,14 +74,15 @@ Cloudflare. That's intentional (see Phase 1b below).
 
 ### In progress
 
-Archiving is implemented and unit-tested, but **not yet verified against a
-real archive call** — it needs a fresh OAuth consent (the `gmail.modify`
-scope is new; existing refresh tokens don't have it). Re-run
-`python gmail_auth_setup.py`, then a real run can be verified end to end.
+Archiving and Gmail labeling (VIP/Known Contact) are both implemented and
+unit-tested, but **neither has been verified against a real Gmail call
+yet** — both need a fresh OAuth consent (the `gmail.modify` scope is new;
+existing refresh tokens don't have it). Re-run `python gmail_auth_setup.py`,
+then a real run can be verified end to end.
 
 ### Next steps
 
-- **Verify real archiving** (above) once re-consent is done.
+- **Verify real archiving and labeling** (above) once re-consent is done.
 - **Phase 1b**: move scheduling to GitHub Actions (cron, 4-6x/day) and
   storage to Cloudflare D1, once the local pipeline has run for a while
   and feels trustworthy. No other component changes expected — the store
