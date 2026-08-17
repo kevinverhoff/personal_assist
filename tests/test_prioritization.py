@@ -1,4 +1,7 @@
-from prioritization import group_messages, format_compact_line, is_attention_worthy, importance_sort_key
+from prioritization import (
+    group_messages, format_compact_line, format_compact_line_with_action,
+    format_action_note, is_attention_worthy, importance_sort_key,
+)
 
 
 def _message(**overrides):
@@ -44,6 +47,30 @@ def test_group_messages_partitions_known_attention_rest():
     assert [m["gmail_message_id"] for m in groups["known"]] == ["m1"]
     assert [m["gmail_message_id"] for m in groups["attention"]] == ["m2"]
     assert [m["gmail_message_id"] for m in groups["rest"]] == ["m3"]
+
+
+def test_format_action_note_archived_takes_precedence():
+    assert format_action_note(_message(archived=1, label_applied="VIP")) == "archived"
+
+
+def test_format_action_note_labeled_vip():
+    assert format_action_note(_message(archived=0, label_applied="VIP")) == "labeled VIP"
+
+
+def test_format_action_note_labeled_known_contact():
+    assert format_action_note(_message(archived=0, label_applied="Known Contact")) == "labeled Known Contact"
+
+
+def test_format_action_note_kept_in_inbox_when_no_action():
+    assert format_action_note(_message(archived=0, label_applied=None)) == "kept in inbox"
+
+
+def test_format_compact_line_with_action_appends_note():
+    line = format_compact_line_with_action(_message(
+        message_type="newsletter", subject="Weekly News", sender_name="X Weekly",
+        sender_email="news@x.com", archived=1, label_applied=None,
+    ))
+    assert line == '- [newsletter] "Weekly News" — X Weekly (news@x.com) — archived'
 
 
 def test_group_messages_sorts_known_and_attention_by_importance():
