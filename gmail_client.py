@@ -5,7 +5,12 @@ import email.utils
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 
-_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+# gmail.modify is a superset of read access plus label changes (archive is
+# implemented as removing the INBOX label) -- it does NOT allow permanent
+# delete/send. Changing this from gmail.readonly requires re-running
+# gmail_auth_setup.py to mint a new refresh token with the new scope; the
+# old token does not gain the new permission automatically.
+_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 
 def build_service(config):
@@ -86,3 +91,9 @@ def fetch_new_messages(service, last_history_id: str | None) -> tuple[list[dict]
         messages.append(_parse_message(raw))
 
     return messages, new_history_id
+
+
+def archive_message(service, gmail_message_id: str) -> None:
+    service.users().messages().modify(
+        userId="me", id=gmail_message_id, body={"removeLabelIds": ["INBOX"]}
+    ).execute()

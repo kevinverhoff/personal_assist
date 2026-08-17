@@ -8,6 +8,12 @@ client, add yourself as a test user, and note the client ID/secret in .env.
 After running: go to the OAuth consent screen and click "Publish App"
 (Testing -> In production, skip verification) to avoid the 7-day refresh
 token expiry that applies while the app stays in Testing status.
+
+Note: the scope below is gmail.modify (read + label changes, used for
+archiving), not gmail.readonly. If you already have a refresh token from
+before archiving existed, it does NOT carry the new permission -- you must
+re-run this script to get a new one; the old token still works for reading
+but a modify call with it will fail.
 """
 import os
 
@@ -16,7 +22,7 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 
 load_dotenv()
 
-_SCOPES = ["https://www.googleapis.com/auth/gmail.readonly"]
+_SCOPES = ["https://www.googleapis.com/auth/gmail.modify"]
 
 
 def main():

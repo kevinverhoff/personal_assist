@@ -1,7 +1,7 @@
 import base64
 from unittest.mock import MagicMock
 
-from gmail_client import fetch_new_messages, _parse_message
+from gmail_client import fetch_new_messages, _parse_message, archive_message
 
 
 def _make_message_payload(gmail_id, subject, sender, internal_date_ms=None):
@@ -88,6 +88,14 @@ def test_fetch_new_messages_paginates_through_history():
         if call.kwargs.get("pageToken") == "page2"
     ]
     assert len(paged_calls) == 1
+
+
+def test_archive_message_removes_inbox_label_only():
+    service = MagicMock()
+    archive_message(service, "msg-1")
+    service.users().messages().modify.assert_called_once_with(
+        userId="me", id="msg-1", body={"removeLabelIds": ["INBOX"]}
+    )
 
 
 def test_fetch_new_messages_no_history_id_does_full_inbox_scan():
