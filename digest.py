@@ -5,7 +5,7 @@ import json
 from classifier import make_client
 from config import load_config
 from notion_client import NotionClient
-from prioritization import group_messages, format_compact_line
+from prioritization import group_messages, format_compact_line, format_compact_line_with_action
 import store
 
 _DIGEST_MODEL = "gemini-flash-lite-latest"
@@ -44,15 +44,23 @@ def phrase_digest(gemini_client, groups: dict) -> str:
     return response.text
 
 
+def _run_at_to_iso(run_at: str) -> str:
+    return datetime.datetime.strptime(run_at, "%Y-%m-%d %H:%M").replace(tzinfo=datetime.UTC).isoformat()
+
+
 def generate_digest(config, conn, notion_client, gemini_client, period: str) -> str:
     now = datetime.datetime.now(datetime.UTC)
-    if period == "daily":
-        start = (now - datetime.timedelta(days=1)).isoformat()
-    else:
-        start = (now - datetime.timedelta(days=7)).isoformat()
-    end = now.isoformat()
 
-    messages = store.get_messages_in_window(conn, start, end)
+    if period == "current":
+        run_at = store.get_latest_run_at(conn)
+        messages = store.get_messages_for_run(conn, run_at) if run_at else []
+        line_formatter = format_compact_line_with_action
+    else:
+        window_days = 1 if period == "daily" else 7
+        start = (now - datetime.timedelta(days=window_days)).isoformat()
+        messages = store.get_messages_in_window(conn, start, now.isoformat())
+        line_formatter = format_compact_line
+
     sections = group_messages(messages)
     routine_groups = group_routine_messages(sections["rest"])
     routine_text = phrase_digest(gemini_client, routine_groups)
@@ -60,13 +68,13 @@ def generate_digest(config, conn, notion_client, gemini_client, period: str) -> 
 
     body_lines = [f"## From people you know ({len(sections['known'])})"]
     if sections["known"]:
-        body_lines.extend(format_compact_line(m) for m in sections["known"])
+        body_lines.extend(line_formatter(m) for m in sections["known"])
     else:
         body_lines.append("None.")
     body_lines.append("")
     body_lines.append(f"## May need your attention ({len(sections['attention'])})")
     if sections["attention"]:
-        body_lines.extend(format_compact_line(m) for m in sections["attention"])
+        body_lines.extend(line_formatter(m) for m in sections["attention"])
     else:
         body_lines.append("None.")
     body_lines.append("")
@@ -74,13 +82,22 @@ def generate_digest(config, conn, notion_client, gemini_client, period: str) -> 
     body_lines.append(routine_text)
     content = "\n".join(body_lines)
 
-    title = f"{period.capitalize()} Digest — {now.strftime('%Y-%m-%d')}"
+    if period == "current":
+        timestamp = run_at or now.strftime("%Y-%m-%d %H:%M")
+        title = f"Current Digest — {timestamp}"
+        date_start = _run_at_to_iso(run_at) if run_at else now.isoformat()
+        period_name = "Current"
+    else:
+        title = f"{period.capitalize()} Digest — {now.strftime('%Y-%m-%d')}"
+        date_start = now.strftime("%Y-%m-%d")
+        period_name = period.capitalize()
+
     page = notion_client.create_page(
         config.notion_email_digests_data_source_id,
         properties={
             "Digest": {"title": [{"text": {"content": title}}]},
-            "Period": {"select": {"name": period.capitalize()}},
-            "Date": {"date": {"start": now.strftime("%Y-%m-%d")}},
+            "Period": {"select": {"name": period_name}},
+            "Date": {"date": {"start": date_start}},
             "Needs Attention Count": {"number": len(sections["attention"])},
             "Routine Count": {"number": routine_count},
         },
@@ -91,7 +108,7 @@ def generate_digest(config, conn, notion_client, gemini_client, period: str) -> 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--period", choices=["daily", "weekly"], required=True)
+    parser.add_argument("--period", choices=["daily", "weekly", "current"], required=True)
     args = parser.parse_args()
 
     cfg = load_config()

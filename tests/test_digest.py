@@ -90,3 +90,64 @@ def test_generate_digest_sections_known_attention_and_routine_are_mutually_exclu
     assert "X Weekly" in content_children  # routine phrasing
     # the routine message must not also be double-counted as "attention"
     assert "news@x.com" not in content_children.split("## Routine mail")[0]
+
+
+def test_generate_digest_current_period_uses_latest_run_and_action_notes():
+    known = _message(gmail_message_id="m1", matched_person_id="p1", message_type="human",
+                      subject="Draft", sender_name="Blaine Rout", sender_email="brout@cityofgreencastle.com",
+                      archived=0, label_applied="Known Contact")
+    attention = _message(gmail_message_id="m2", importance="high", archived=1, label_applied=None,
+                          subject="Security alert", sender_name="Google", sender_email="no-reply@accounts.google.com")
+
+    conn = MagicMock()
+    config = MagicMock()
+    config.notion_email_digests_data_source_id = "digests-ds"
+    notion_client = MagicMock()
+    notion_client.create_page.return_value = {"id": "digest-page-1"}
+    gemini_client = MagicMock()
+    gemini_response = MagicMock()
+    gemini_response.text = "Nothing routine to report."
+    gemini_client.models.generate_content.return_value = gemini_response
+
+    import store as store_module
+    original_get_latest_run_at = store_module.get_latest_run_at
+    original_get_messages_for_run = store_module.get_messages_for_run
+    store_module.get_latest_run_at = lambda conn: "2026-08-17 17:24"
+    store_module.get_messages_for_run = lambda conn, run_at: [known, attention] if run_at == "2026-08-17 17:24" else []
+    try:
+        generate_digest(config, conn, notion_client, gemini_client, "current")
+    finally:
+        store_module.get_latest_run_at = original_get_latest_run_at
+        store_module.get_messages_for_run = original_get_messages_for_run
+
+    content = notion_client.create_page.call_args.kwargs["content"]
+    assert "Blaine Rout" in content and "labeled Known Contact" in content
+    assert "Google" in content and "archived" in content
+
+    properties = notion_client.create_page.call_args.kwargs["properties"]
+    assert properties["Period"]["select"]["name"] == "Current"
+    assert properties["Date"]["date"]["start"] == "2026-08-17T17:24:00+00:00"
+    assert "2026-08-17 17:24" in properties["Digest"]["title"][0]["text"]["content"]
+
+
+def test_generate_digest_current_period_with_no_successful_run_yet():
+    conn = MagicMock()
+    config = MagicMock()
+    config.notion_email_digests_data_source_id = "digests-ds"
+    notion_client = MagicMock()
+    notion_client.create_page.return_value = {"id": "digest-page-1"}
+    gemini_client = MagicMock()
+    gemini_response = MagicMock()
+    gemini_response.text = "Nothing routine to report."
+    gemini_client.models.generate_content.return_value = gemini_response
+
+    import store as store_module
+    original_get_latest_run_at = store_module.get_latest_run_at
+    store_module.get_latest_run_at = lambda conn: None
+    try:
+        generate_digest(config, conn, notion_client, gemini_client, "current")
+    finally:
+        store_module.get_latest_run_at = original_get_latest_run_at
+
+    content = notion_client.create_page.call_args.kwargs["content"]
+    assert "None." in content
