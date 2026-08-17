@@ -23,7 +23,9 @@ CREATE TABLE IF NOT EXISTS messages (
   matched_org_ids TEXT,
   processed_at TEXT,
   archived INTEGER DEFAULT 0,
-  archived_at TEXT
+  archived_at TEXT,
+  run_at TEXT,
+  label_applied TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -55,7 +57,16 @@ _MESSAGE_COLUMNS = [
     "received_at", "snippet", "message_type", "importance", "action_required",
     "keep_in_inbox", "digest_worthy", "confidence", "reasoning",
     "person_org_signal", "matched_person_id", "matched_org_ids", "processed_at",
+    "run_at", "label_applied",
 ]
+
+
+def _migrate_messages_table(conn: sqlite3.Connection) -> None:
+    existing_columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+    for column in ("run_at", "label_applied"):
+        if column not in existing_columns:
+            conn.execute(f"ALTER TABLE messages ADD COLUMN {column} TEXT")
+    conn.commit()
 
 
 def init_db(db_path: str) -> sqlite3.Connection:
@@ -65,6 +76,7 @@ def init_db(db_path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(_SCHEMA)
     conn.commit()
+    _migrate_messages_table(conn)
     return conn
 
 
@@ -75,7 +87,7 @@ def upsert_message(conn: sqlite3.Connection, message: dict) -> None:
     conn.execute(
         f"INSERT INTO messages ({columns}) VALUES ({placeholders}) "
         f"ON CONFLICT(gmail_message_id) DO UPDATE SET {update_clause}",
-        [message[col] for col in _MESSAGE_COLUMNS],
+        [message.get(col) for col in _MESSAGE_COLUMNS],
     )
     conn.commit()
 
@@ -125,6 +137,20 @@ def get_messages_in_window(conn: sqlite3.Connection, start_iso: str, end_iso: st
     rows = conn.execute(
         "SELECT * FROM messages WHERE received_at >= ? AND received_at <= ? ORDER BY received_at",
         (start_iso, end_iso),
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def get_latest_run_at(conn: sqlite3.Connection) -> str | None:
+    row = conn.execute(
+        "SELECT run_at FROM run_log WHERE status = 'ok' ORDER BY run_at DESC LIMIT 1"
+    ).fetchone()
+    return row["run_at"] if row else None
+
+
+def get_messages_for_run(conn: sqlite3.Connection, run_at: str) -> list[dict]:
+    rows = conn.execute(
+        "SELECT * FROM messages WHERE run_at = ? ORDER BY received_at", (run_at,)
     ).fetchall()
     return [dict(row) for row in rows]
 

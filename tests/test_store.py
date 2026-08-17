@@ -1,3 +1,5 @@
+import sqlite3
+
 import store
 
 
@@ -117,6 +119,77 @@ def test_new_messages_default_to_not_archived():
     })
     row = conn.execute("SELECT archived FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
     assert row["archived"] == 0
+
+
+def test_init_db_adds_new_columns_to_legacy_messages_table(tmp_path):
+    # Reproduces the real scenario: an already-accumulated database file
+    # created before run_at/label_applied existed. Migration must add the
+    # columns without touching existing rows or requiring a rebuild.
+    db_path = str(tmp_path / "legacy.db")
+    legacy_conn = sqlite3.connect(db_path)
+    legacy_conn.execute("""
+        CREATE TABLE messages (
+          gmail_message_id TEXT PRIMARY KEY,
+          subject TEXT,
+          archived INTEGER DEFAULT 0,
+          archived_at TEXT
+        )
+    """)
+    legacy_conn.execute("INSERT INTO messages (gmail_message_id, subject) VALUES ('msg-1', 'old subject')")
+    legacy_conn.commit()
+    legacy_conn.close()
+
+    conn = store.init_db(db_path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
+    assert "run_at" in columns
+    assert "label_applied" in columns
+    row = conn.execute("SELECT subject, run_at, label_applied FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["subject"] == "old subject"
+    assert row["run_at"] is None
+    assert row["label_applied"] is None
+
+
+def test_get_latest_run_at_returns_most_recent_ok_run():
+    conn = store.init_db(":memory:")
+    store.insert_run_log(conn, run_at="2026-08-17 14:20", messages_processed=14, status="ok", errors=None)
+    store.insert_run_log(conn, run_at="2026-08-17 17:21", messages_processed=0, status="auth_error", errors="boom")
+    store.insert_run_log(conn, run_at="2026-08-17 17:24", messages_processed=7, status="ok", errors=None)
+    assert store.get_latest_run_at(conn) == "2026-08-17 17:24"
+
+
+def test_get_latest_run_at_returns_none_when_no_successful_runs():
+    conn = store.init_db(":memory:")
+    store.insert_run_log(conn, run_at="2026-08-17 17:21", messages_processed=0, status="auth_error", errors="boom")
+    assert store.get_latest_run_at(conn) is None
+
+
+def test_get_messages_for_run_filters_by_run_at():
+    conn = store.init_db(":memory:")
+    for gmail_message_id, run_at in [("msg-1", "2026-08-17 14:20"), ("msg-2", "2026-08-17 17:24")]:
+        store.upsert_message(conn, {
+            "gmail_message_id": gmail_message_id, "thread_id": "t", "sender_email": "a@x.com",
+            "sender_name": "A", "subject": gmail_message_id, "received_at": "2026-08-17T07:00:00Z", "snippet": "",
+            "message_type": "human", "importance": "high", "action_required": 0,
+            "keep_in_inbox": 1, "digest_worthy": 0, "confidence": 0.9, "reasoning": "r",
+            "person_org_signal": None, "matched_person_id": None, "matched_org_ids": None,
+            "processed_at": "2026-08-17T07:00:01Z", "run_at": run_at,
+        })
+    results = store.get_messages_for_run(conn, "2026-08-17 17:24")
+    assert [m["gmail_message_id"] for m in results] == ["msg-2"]
+
+
+def test_upsert_message_stores_label_applied():
+    conn = store.init_db(":memory:")
+    store.upsert_message(conn, {
+        "gmail_message_id": "msg-1", "thread_id": "t", "sender_email": "a@x.com",
+        "sender_name": "A", "subject": "s", "received_at": "2026-08-17T07:00:00Z", "snippet": "",
+        "message_type": "human", "importance": "high", "action_required": 0,
+        "keep_in_inbox": 1, "digest_worthy": 0, "confidence": 0.9, "reasoning": "r",
+        "person_org_signal": None, "matched_person_id": "p1", "matched_org_ids": None,
+        "processed_at": "2026-08-17T07:00:01Z", "run_at": "2026-08-17 17:24", "label_applied": "VIP",
+    })
+    row = conn.execute("SELECT label_applied FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["label_applied"] == "VIP"
 
 
 def test_get_recent_messages_limit_and_order():
