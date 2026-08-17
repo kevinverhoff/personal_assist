@@ -5,9 +5,11 @@ Hi! I'm Kevin's personal assistant!
 This repo is the first real piece of that: an **Email Intelligence Agent**
 for personal Gmail. It reads your inbox, classifies each message along
 several independent dimensions, cross-references the sender against a
-Notion knowledge base of people/organizations you actually know, and
-produces a human-readable summary and digest — all without ever touching
-Gmail itself (no archive, delete, label, or send).
+Notion knowledge base of people/organizations you actually know, prioritizes
+messages from people you know, and archives routine mail it's confident
+about — while never touching anything from someone in your People database,
+and never deleting anything (archived mail just leaves the inbox; it's
+still fully there in All Mail, one click to undo).
 
 Full design rationale lives in
 [`docs/superpowers/specs/2026-08-14-email-intelligence-agent-design.md`](docs/superpowers/specs/2026-08-14-email-intelligence-agent-design.md);
@@ -16,15 +18,16 @@ the task-by-task build record is in
 
 ## Where things stand
 
-**Phase 1 (observe-only) is fully built and verified against real Gmail,
-Gemini, and Notion data** — not just unit tests. 59 automated tests pass;
-every external integration has also been run for real at least once.
+**Phase 1 is fully built and mostly verified against real Gmail, Gemini,
+and Notion data** — not just unit tests. 82 automated tests pass.
 
 What exists today:
 
-- `gmail_client.py` / `gmail_auth_setup.py` — read-only Gmail ingestion
-  (`gmail.readonly` scope only), scoped to `in:inbox`, incremental via
-  Gmail's history API.
+- `gmail_client.py` / `gmail_auth_setup.py` — Gmail ingestion scoped to
+  `in:inbox`, incremental via Gmail's history API (paginated correctly —
+  an earlier bug silently dropped messages past the first 100 history
+  records; fixed and verified with real mail). Uses the `gmail.modify`
+  scope (read + label changes only — no permanent delete, no send).
 - `signals.py` — deterministic header signals (bulk mail, `no-reply@`, etc.)
   fed to the classifier as context.
 - `classifier.py` — one Gemini call per message, returning 7 independent
@@ -36,6 +39,19 @@ What exists today:
   Notion People/Email Addresses databases, and auto-creates/attaches new
   People and Email Addresses for real senders not yet known — always
   marked `Needs Review` / `Inferred`, never presented as confirmed fact.
+  The in-memory cache updates itself immediately after every write, so a
+  batch with several messages from the same brand-new sender doesn't
+  create a duplicate Person for each one.
+- `prioritization.py` — shared grouping logic: messages from people in
+  your People database first, then anything else that needs attention
+  (high/critical importance or action-required), then everything else.
+  Used by both the run summary and the digest, formatted compactly
+  (`[type] "subject" — sender (email)`).
+- `archiving.py` / `main.py` — archives a message (removes the INBOX
+  label, never deletes) only when it's routine (`digest_worthy`),
+  high-confidence (≥ 0.9), **and** the sender does not match anyone in
+  your People database. On by default; `--no-archive` opts out for a run.
+  Every archived message is logged with enough detail to find and undo it.
 - `store.py` — local SQLite (schema designed to be a drop-in match for
   Cloudflare D1 later).
 - `agent_log.py` — a local "notepad" log plus a single Notion "Latest Run"
@@ -51,15 +67,14 @@ Cloudflare. That's intentional (see Phase 1b below).
 
 ### In progress
 
-A change to prioritize messages from people already in the Notion People
-database first, then separately surface anything else that may need
-attention — in the per-run summary, the Notion "Latest Run" page, and the
-digest's attention recap. Design agreed; not yet implemented.
+Archiving is implemented and unit-tested, but **not yet verified against a
+real archive call** — it needs a fresh OAuth consent (the `gmail.modify`
+scope is new; existing refresh tokens don't have it). Re-run
+`python gmail_auth_setup.py`, then a real run can be verified end to end.
 
 ### Next steps
 
-- **Known-people-first prioritization** (above) — implement, test, verify
-  against real data.
+- **Verify real archiving** (above) once re-consent is done.
 - **Phase 1b**: move scheduling to GitHub Actions (cron, 4-6x/day) and
   storage to Cloudflare D1, once the local pipeline has run for a while
   and feels trustworthy. No other component changes expected — the store
@@ -67,9 +82,10 @@ digest's attention recap. Design agreed; not yet implemented.
 - **v1.1**: signature/domain-based Organization and Affiliation inference
   for newly-discovered senders (deliberately deferred out of Phase 1 as
   the riskiest, least-tested piece of the design).
-- Eventually, an approval-gated action layer (e.g. archive-after-digest
-  for newsletters) — only once `feedback.py` data shows the classifier is
-  actually trustworthy enough to act on.
+- Consider whether other action types (beyond archiving routine mail)
+  should eventually be approval-gated rather than automatic, once
+  `feedback.py` data accumulates enough to know how trustworthy the
+  classifier actually is.
 
 ## Running it locally
 
@@ -104,7 +120,10 @@ Agent" parent page.
    click through it), then prints a refresh token to paste into `.env`.
    Afterwards, go to the OAuth consent screen in Google Cloud Console and
    click **Publish App** (Testing → In production, skip verification) —
-   otherwise the refresh token expires after 7 days.
+   otherwise the refresh token expires after 7 days. The scope is
+   `gmail.modify` (read + label changes, used for archiving) — if you have
+   an older refresh token minted before archiving existed, it does not
+   carry this permission; re-run this script to get a new one.
 
 4. **Run the tests:**
 
@@ -115,13 +134,16 @@ Agent" parent page.
 5. **Run the pipeline:**
 
    ```bash
-   python main.py --dry-run   # logs what would happen, writes nothing to Notion
-   python main.py             # the real thing
+   python main.py --dry-run     # logs what would happen, writes nothing to Notion/Gmail
+   python main.py               # the real thing — archives routine mail by default
+   python main.py --no-archive  # real Notion writes, but never archives anything
    python digest.py --period daily    # or --period weekly
-   python feedback.py         # correct a recent classification
+   python feedback.py           # correct a recent classification
    ```
 
    Check `logs/agent_log.md` after a run, or the "Email Agent — Latest Run"
-   page in Notion. Local state lives in `data/email_agent.db` (SQLite) —
-   safe to delete if you want a clean rebuild; it's rebuilt from Gmail on
-   the next run.
+   page in Notion — both list anything archived with its subject and
+   sender so you can find and undo it in Gmail if needed (archived mail
+   isn't deleted, just moved out of the inbox). Local state lives in
+   `data/email_agent.db` (SQLite) — safe to delete if you want a clean
+   rebuild; it's rebuilt from Gmail on the next run.
