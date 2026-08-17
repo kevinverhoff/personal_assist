@@ -28,20 +28,35 @@ def _one_message(**overrides):
     return base
 
 
-@patch("main.archive_message")
-@patch("main.build_service")
-@patch("main.fetch_new_messages")
-@patch("main.make_client")
-@patch("main.classify_message")
-@patch("main.NotionClient")
-@patch("main.PeopleCache")
-@patch("main.reconcile_sender")
-@patch("main.update_latest_run_page")
+def _patch_main(test_func):
+    """Applies the full set of main.py dependency patches every test needs,
+    innermost-first so the wrapped test receives them in call order."""
+    decorators = [
+        patch("main.update_latest_run_page"),
+        patch("main.reconcile_sender"),
+        patch("main.PeopleCache"),
+        patch("main.NotionClient"),
+        patch("main.classify_message"),
+        patch("main.make_client"),
+        patch("main.apply_label"),
+        patch("main.get_or_create_label"),
+        patch("main.archive_message"),
+        patch("main.fetch_new_messages"),
+        patch("main.build_service"),
+    ]
+    for decorator in reversed(decorators):
+        test_func = decorator(test_func)
+    return test_func
+
+
+@_patch_main
 def test_run_processes_messages_and_updates_checkpoint(
-    mock_update_page, mock_reconcile, mock_cache_cls, mock_notion_cls,
-    mock_classify, mock_gemini_client, mock_fetch, mock_gmail_service, mock_archive, tmp_path, monkeypatch
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
     mock_fetch.return_value = ([_one_message()], "history-2")
     mock_classify.return_value = {
         "message_type": "human", "importance": "high", "action_required": True,
@@ -63,22 +78,17 @@ def test_run_processes_messages_and_updates_checkpoint(
     sync_state = conn.execute("SELECT last_history_id FROM sync_state").fetchone()
     assert sync_state[0] == "history-2"
     mock_archive.assert_not_called()  # human message, not archive-eligible
+    mock_apply_label.assert_not_called()  # sender not matched to a known Person
 
 
-@patch("main.archive_message")
-@patch("main.build_service")
-@patch("main.fetch_new_messages")
-@patch("main.make_client")
-@patch("main.classify_message")
-@patch("main.NotionClient")
-@patch("main.PeopleCache")
-@patch("main.reconcile_sender")
-@patch("main.update_latest_run_page")
+@_patch_main
 def test_run_classifier_failure_keeps_message_in_inbox(
-    mock_update_page, mock_reconcile, mock_cache_cls, mock_notion_cls,
-    mock_classify, mock_gemini_client, mock_fetch, mock_gmail_service, mock_archive, tmp_path, monkeypatch
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
     mock_fetch.return_value = ([_one_message()], "history-2")
     mock_classify.return_value = {
         "message_type": "uncertain", "importance": "medium", "action_required": False,
@@ -98,20 +108,14 @@ def test_run_classifier_failure_keeps_message_in_inbox(
     mock_archive.assert_not_called()
 
 
-@patch("main.archive_message")
-@patch("main.build_service")
-@patch("main.fetch_new_messages")
-@patch("main.make_client")
-@patch("main.classify_message")
-@patch("main.NotionClient")
-@patch("main.PeopleCache")
-@patch("main.reconcile_sender")
-@patch("main.update_latest_run_page")
+@_patch_main
 def test_run_archives_routine_high_confidence_unmatched_message(
-    mock_update_page, mock_reconcile, mock_cache_cls, mock_notion_cls,
-    mock_classify, mock_gemini_client, mock_fetch, mock_gmail_service, mock_archive, tmp_path, monkeypatch
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
     mock_fetch.return_value = ([_one_message(sender_email="news@x.com", sender_name="X Weekly")], "history-2")
     mock_classify.return_value = {
         "message_type": "newsletter", "importance": "low", "action_required": False,
@@ -130,27 +134,23 @@ def test_run_archives_routine_high_confidence_unmatched_message(
     assert row[0] == 1
 
 
-@patch("main.archive_message")
-@patch("main.build_service")
-@patch("main.fetch_new_messages")
-@patch("main.make_client")
-@patch("main.classify_message")
-@patch("main.NotionClient")
-@patch("main.PeopleCache")
-@patch("main.reconcile_sender")
-@patch("main.update_latest_run_page")
+@_patch_main
 def test_run_does_not_archive_when_matched_to_known_person(
-    mock_update_page, mock_reconcile, mock_cache_cls, mock_notion_cls,
-    mock_classify, mock_gemini_client, mock_fetch, mock_gmail_service, mock_archive, tmp_path, monkeypatch
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
     mock_fetch.return_value = ([_one_message()], "history-2")
     mock_classify.return_value = {
         "message_type": "newsletter", "importance": "low", "action_required": False,
         "keep_in_inbox": False, "digest_worthy": True, "person_org_signal": None,
         "confidence": 0.99, "reasoning": "newsletter",
     }
-    mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: {"person_id": "p1", "person_name": "Someone"})
+    mock_cache_cls.load.return_value = MagicMock(
+        match_by_email=lambda e: {"person_id": "p1", "person_name": "Someone", "importance": None}
+    )
     mock_reconcile.return_value = {"action": "known", "person_id": "p1"}
 
     import main
@@ -159,20 +159,14 @@ def test_run_does_not_archive_when_matched_to_known_person(
     mock_archive.assert_not_called()
 
 
-@patch("main.archive_message")
-@patch("main.build_service")
-@patch("main.fetch_new_messages")
-@patch("main.make_client")
-@patch("main.classify_message")
-@patch("main.NotionClient")
-@patch("main.PeopleCache")
-@patch("main.reconcile_sender")
-@patch("main.update_latest_run_page")
+@_patch_main
 def test_run_does_not_archive_when_archive_flag_is_false(
-    mock_update_page, mock_reconcile, mock_cache_cls, mock_notion_cls,
-    mock_classify, mock_gemini_client, mock_fetch, mock_gmail_service, mock_archive, tmp_path, monkeypatch
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
     mock_fetch.return_value = ([_one_message()], "history-2")
     mock_classify.return_value = {
         "message_type": "newsletter", "importance": "low", "action_required": False,
@@ -188,18 +182,11 @@ def test_run_does_not_archive_when_archive_flag_is_false(
     mock_archive.assert_not_called()
 
 
-@patch("main.archive_message")
-@patch("main.build_service")
-@patch("main.fetch_new_messages")
-@patch("main.make_client")
-@patch("main.classify_message")
-@patch("main.NotionClient")
-@patch("main.PeopleCache")
-@patch("main.reconcile_sender")
-@patch("main.update_latest_run_page")
+@_patch_main
 def test_run_does_not_archive_during_dry_run(
-    mock_update_page, mock_reconcile, mock_cache_cls, mock_notion_cls,
-    mock_classify, mock_gemini_client, mock_fetch, mock_gmail_service, mock_archive, tmp_path, monkeypatch
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
     mock_fetch.return_value = ([_one_message()], "history-2")
@@ -215,3 +202,55 @@ def test_run_does_not_archive_during_dry_run(
     main.run(dry_run=True, archive=True)
 
     mock_archive.assert_not_called()
+    mock_get_or_create_label.assert_not_called()  # dry-run touches nothing in Gmail
+    mock_apply_label.assert_not_called()
+
+
+@_patch_main
+def test_run_applies_vip_label_for_vip_known_sender(
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
+):
+    _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
+    mock_fetch.return_value = ([_one_message(sender_email="cbarr@wicaa.org", sender_name="Carole Barr")], "history-2")
+    mock_classify.return_value = {
+        "message_type": "human", "importance": "high", "action_required": False,
+        "keep_in_inbox": True, "digest_worthy": False, "person_org_signal": None,
+        "confidence": 0.95, "reasoning": "known VIP contact",
+    }
+    mock_cache_cls.load.return_value = MagicMock(
+        match_by_email=lambda e: {"person_id": "p1", "person_name": "Carole Barr", "importance": "VIP"}
+    )
+    mock_reconcile.return_value = {"action": "known", "person_id": "p1"}
+
+    import main
+    main.run(dry_run=False, archive=True)
+
+    mock_apply_label.assert_called_once_with(mock_gmail_service.return_value, "msg-1", "vip-label-id")
+
+
+@_patch_main
+def test_run_applies_known_contact_label_for_non_vip_known_sender(
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    tmp_path, monkeypatch,
+):
+    _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
+    mock_fetch.return_value = ([_one_message(sender_email="brout@cityofgreencastle.com", sender_name="Blaine Rout")], "history-2")
+    mock_classify.return_value = {
+        "message_type": "human", "importance": "medium", "action_required": False,
+        "keep_in_inbox": True, "digest_worthy": False, "person_org_signal": None,
+        "confidence": 0.9, "reasoning": "known contact",
+    }
+    mock_cache_cls.load.return_value = MagicMock(
+        match_by_email=lambda e: {"person_id": "p2", "person_name": "Blaine Rout", "importance": None}
+    )
+    mock_reconcile.return_value = {"action": "known", "person_id": "p2"}
+
+    import main
+    main.run(dry_run=False, archive=True)
+
+    mock_apply_label.assert_called_once_with(mock_gmail_service.return_value, "msg-1", "known-label-id")

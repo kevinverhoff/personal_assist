@@ -4,13 +4,23 @@ import datetime
 from archiving import should_archive
 from classifier import classify_message, make_client
 from config import load_config
-from gmail_client import build_service, fetch_new_messages, archive_message
+from gmail_client import build_service, fetch_new_messages, archive_message, get_or_create_label, apply_label
 from notion_client import NotionClient
 from people_lookup import PeopleCache
 from reconciliation import reconcile_sender
 from agent_log import append_run_summary, update_latest_run_page
 from signals import extract_signals
 import store
+
+
+# Gmail's colored "SuperStars" are UI-only and not exposed via the API at
+# all (not even the plain star can be recolored) -- real labels are the
+# closest API-controllable equivalent, using colors from Gmail's documented
+# allowed palette (https://developers.google.com/workspace/gmail/api/reference/rest/v1/users.labels#Label.Color).
+VIP_LABEL_NAME = "VIP"
+VIP_LABEL_COLOR = ("#fb4c2f", "#ffffff")
+KNOWN_CONTACT_LABEL_NAME = "Known Contact"
+KNOWN_CONTACT_LABEL_COLOR = ("#fad165", "#000000")
 
 
 def run(dry_run: bool = False, archive: bool = True) -> dict:
@@ -27,6 +37,11 @@ def run(dry_run: bool = False, archive: bool = True) -> dict:
         store.insert_run_log(conn, run_at, 0, "auth_error", str(error))
         return {"status": "auth_error", "messages_processed": 0}
 
+    vip_label_id, known_label_id = None, None
+    if not dry_run:
+        vip_label_id = get_or_create_label(gmail_service, VIP_LABEL_NAME, *VIP_LABEL_COLOR)
+        known_label_id = get_or_create_label(gmail_service, KNOWN_CONTACT_LABEL_NAME, *KNOWN_CONTACT_LABEL_COLOR)
+
     notion_client = NotionClient(config.notion_token)
     people_cache = PeopleCache.load(notion_client, config)
     gemini_client = make_client(config.gemini_api_key)
@@ -39,6 +54,10 @@ def run(dry_run: bool = False, archive: bool = True) -> dict:
         classification = classify_message(
             gemini_client, message["subject"], message["snippet"], message["body"], sig, person_match
         )
+
+        if not dry_run and person_match:
+            label_id = vip_label_id if person_match.get("importance") == "VIP" else known_label_id
+            apply_label(gmail_service, message["gmail_message_id"], label_id)
 
         is_human = classification["message_type"] == "human"
         reconciliation_result = reconcile_sender(
