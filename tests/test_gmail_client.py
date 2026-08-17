@@ -66,6 +66,30 @@ def test_parse_message_falls_back_to_date_header_without_internal_date():
     assert result["received_at"] == "2026-08-15T11:00:00+00:00"
 
 
+def test_fetch_new_messages_paginates_through_history():
+    # Reproduces the real bug: Gmail's history.list caps at 100 records per
+    # page. With enough mailbox activity (reads, label changes, not just new
+    # mail) between runs, genuinely new messages can land on page 2+, which
+    # must not be silently dropped.
+    service = MagicMock()
+    service.users().history().list().execute.side_effect = [
+        {"history": [{"messagesAdded": []}], "historyId": "999", "nextPageToken": "page2"},
+        {"history": [{"messagesAdded": [{"message": {"id": "msg-1"}}]}], "historyId": "999"},
+    ]
+    service.users().messages().get().execute.return_value = _make_message_payload(
+        "msg-1", "Hello there", "Jane Somebody <jane@example.com>"
+    )
+    messages, new_history_id = fetch_new_messages(service, last_history_id="100")
+    assert new_history_id == "999"
+    assert len(messages) == 1
+    assert messages[0]["gmail_message_id"] == "msg-1"
+    paged_calls = [
+        call.kwargs for call in service.users().history().list.call_args_list
+        if call.kwargs.get("pageToken") == "page2"
+    ]
+    assert len(paged_calls) == 1
+
+
 def test_fetch_new_messages_no_history_id_does_full_inbox_scan():
     service = MagicMock()
     service.users().messages().list().execute.return_value = {"messages": [{"id": "msg-1"}]}

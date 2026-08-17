@@ -61,13 +61,20 @@ def fetch_new_messages(service, last_history_id: str | None) -> tuple[list[dict]
     message_ids: list[str] = []
 
     if last_history_id:
-        history_response = service.users().history().list(
-            userId="me", startHistoryId=last_history_id, labelId="INBOX"
-        ).execute()
-        for record in history_response.get("history", []):
-            for added in record.get("messagesAdded", []):
-                message_ids.append(added["message"]["id"])
-        new_history_id = history_response["historyId"]
+        page_token = None
+        new_history_id = last_history_id
+        while True:
+            kwargs = {"userId": "me", "startHistoryId": last_history_id, "labelId": "INBOX"}
+            if page_token:
+                kwargs["pageToken"] = page_token
+            history_response = service.users().history().list(**kwargs).execute()
+            for record in history_response.get("history", []):
+                for added in record.get("messagesAdded", []):
+                    message_ids.append(added["message"]["id"])
+            new_history_id = history_response["historyId"]
+            page_token = history_response.get("nextPageToken")
+            if not page_token:
+                break
     else:
         list_response = service.users().messages().list(userId="me", q="in:inbox").execute()
         message_ids = [m["id"] for m in list_response.get("messages", [])]
