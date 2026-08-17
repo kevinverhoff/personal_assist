@@ -89,6 +89,36 @@ def test_get_messages_in_window_filters_by_date():
     assert [m["gmail_message_id"] for m in results] == ["msg-1"]
 
 
+def test_mark_archived_sets_flag_and_timestamp():
+    conn = store.init_db(":memory:")
+    store.upsert_message(conn, {
+        "gmail_message_id": "msg-1", "thread_id": "t", "sender_email": "a@x.com",
+        "sender_name": "A", "subject": "s", "received_at": "2026-08-17T07:00:00Z", "snippet": "",
+        "message_type": "newsletter", "importance": "low", "action_required": 0,
+        "keep_in_inbox": 0, "digest_worthy": 1, "confidence": 0.95, "reasoning": "r",
+        "person_org_signal": None, "matched_person_id": None, "matched_org_ids": None,
+        "processed_at": "2026-08-17T07:00:01Z",
+    })
+    store.mark_archived(conn, "msg-1", "2026-08-17T07:05:00Z")
+    row = conn.execute("SELECT archived, archived_at FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["archived"] == 1
+    assert row["archived_at"] == "2026-08-17T07:05:00Z"
+
+
+def test_new_messages_default_to_not_archived():
+    conn = store.init_db(":memory:")
+    store.upsert_message(conn, {
+        "gmail_message_id": "msg-1", "thread_id": "t", "sender_email": "a@x.com",
+        "sender_name": "A", "subject": "s", "received_at": "2026-08-17T07:00:00Z", "snippet": "",
+        "message_type": "human", "importance": "high", "action_required": 0,
+        "keep_in_inbox": 1, "digest_worthy": 0, "confidence": 0.9, "reasoning": "r",
+        "person_org_signal": None, "matched_person_id": None, "matched_org_ids": None,
+        "processed_at": "2026-08-17T07:00:01Z",
+    })
+    row = conn.execute("SELECT archived FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["archived"] == 0
+
+
 def test_get_recent_messages_limit_and_order():
     conn = store.init_db(":memory:")
     for i, received_at in enumerate(["2026-08-14T07:00:00Z", "2026-08-15T07:00:00Z", "2026-08-16T07:00:00Z"]):

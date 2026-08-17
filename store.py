@@ -21,7 +21,9 @@ CREATE TABLE IF NOT EXISTS messages (
   person_org_signal TEXT,
   matched_person_id TEXT,
   matched_org_ids TEXT,
-  processed_at TEXT
+  processed_at TEXT,
+  archived INTEGER DEFAULT 0,
+  archived_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -107,6 +109,14 @@ def insert_feedback(conn: sqlite3.Connection, gmail_message_id: str, original_cl
         "INSERT INTO feedback (gmail_message_id, original_classification, corrected_fields, note, corrected_at) "
         "VALUES (?, ?, ?, ?, ?)",
         (gmail_message_id, original_classification, corrected_fields, note, corrected_at),
+    )
+    conn.commit()
+
+
+def mark_archived(conn: sqlite3.Connection, gmail_message_id: str, archived_at: str) -> None:
+    conn.execute(
+        "UPDATE messages SET archived = 1, archived_at = ? WHERE gmail_message_id = ?",
+        (archived_at, gmail_message_id),
     )
     conn.commit()
 
