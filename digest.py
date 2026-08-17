@@ -5,6 +5,7 @@ import json
 from classifier import make_client
 from config import load_config
 from notion_client import NotionClient
+from prioritization import group_messages, format_compact_line
 import store
 
 _DIGEST_MODEL = "gemini-flash-lite-latest"
@@ -22,14 +23,6 @@ def group_routine_messages(messages: list[dict]) -> dict:
         if sender not in groups[message_type]["senders"]:
             groups[message_type]["senders"].append(sender)
     return groups
-
-
-def build_attention_recap(messages: list[dict]) -> list[str]:
-    recap = []
-    for message in messages:
-        if message.get("importance") == "high" or message.get("importance") == "critical" or message.get("action_required"):
-            recap.append(f"- {message['sender_name']}: \"{message['subject']}\" — {message['reasoning']}")
-    return recap
 
 
 def phrase_digest(gemini_client, groups: dict) -> str:
@@ -54,13 +47,22 @@ def generate_digest(config, conn, notion_client, gemini_client, period: str) -> 
     end = now.isoformat()
 
     messages = store.get_messages_in_window(conn, start, end)
-    groups = group_routine_messages(messages)
-    recap = build_attention_recap(messages)
-    routine_text = phrase_digest(gemini_client, groups)
-    routine_count = sum(g["count"] for g in groups.values())
+    sections = group_messages(messages)
+    routine_groups = group_routine_messages(sections["rest"])
+    routine_text = phrase_digest(gemini_client, routine_groups)
+    routine_count = sum(g["count"] for g in routine_groups.values())
 
-    body_lines = ["## Needs your attention"]
-    body_lines.extend(recap if recap else ["Nothing needed your attention this period."])
+    body_lines = [f"## From people you know ({len(sections['known'])})"]
+    if sections["known"]:
+        body_lines.extend(format_compact_line(m) for m in sections["known"])
+    else:
+        body_lines.append("None.")
+    body_lines.append("")
+    body_lines.append(f"## May need your attention ({len(sections['attention'])})")
+    if sections["attention"]:
+        body_lines.extend(format_compact_line(m) for m in sections["attention"])
+    else:
+        body_lines.append("None.")
     body_lines.append("")
     body_lines.append("## Routine mail")
     body_lines.append(routine_text)
@@ -73,7 +75,7 @@ def generate_digest(config, conn, notion_client, gemini_client, period: str) -> 
             "Digest": {"title": [{"text": {"content": title}}]},
             "Period": {"select": {"name": period.capitalize()}},
             "Date": {"date": {"start": now.strftime("%Y-%m-%d")}},
-            "Needs Attention Count": {"number": len(recap)},
+            "Needs Attention Count": {"number": len(sections["attention"])},
             "Routine Count": {"number": routine_count},
         },
         content=content,
