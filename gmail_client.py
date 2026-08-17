@@ -97,3 +97,27 @@ def archive_message(service, gmail_message_id: str) -> None:
     service.users().messages().modify(
         userId="me", id=gmail_message_id, body={"removeLabelIds": ["INBOX"]}
     ).execute()
+
+
+def get_or_create_label(service, name: str, background_color: str, text_color: str) -> str:
+    existing = service.users().labels().list(userId="me").execute().get("labels", [])
+    for label in existing:
+        if label["name"] == name:
+            return label["id"]
+
+    created = service.users().labels().create(
+        userId="me",
+        body={
+            "name": name,
+            "labelListVisibility": "labelShow",
+            "messageListVisibility": "show",
+            "color": {"backgroundColor": background_color, "textColor": text_color},
+        },
+    ).execute()
+    return created["id"]
+
+
+def apply_label(service, gmail_message_id: str, label_id: str) -> None:
+    service.users().messages().modify(
+        userId="me", id=gmail_message_id, body={"addLabelIds": [label_id]}
+    ).execute()

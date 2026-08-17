@@ -1,7 +1,7 @@
 import base64
 from unittest.mock import MagicMock
 
-from gmail_client import fetch_new_messages, _parse_message, archive_message
+from gmail_client import fetch_new_messages, _parse_message, archive_message, get_or_create_label, apply_label
 
 
 def _make_message_payload(gmail_id, subject, sender, internal_date_ms=None):
@@ -95,6 +95,35 @@ def test_archive_message_removes_inbox_label_only():
     archive_message(service, "msg-1")
     service.users().messages().modify.assert_called_once_with(
         userId="me", id="msg-1", body={"removeLabelIds": ["INBOX"]}
+    )
+
+
+def test_get_or_create_label_returns_existing_label_id_without_creating():
+    service = MagicMock()
+    service.users().labels().list().execute.return_value = {
+        "labels": [{"id": "Label_1", "name": "VIP"}, {"id": "Label_2", "name": "Known Contact"}]
+    }
+    label_id = get_or_create_label(service, "VIP", background_color="#fb4c2f", text_color="#ffffff")
+    assert label_id == "Label_1"
+    service.users().labels().create.assert_not_called()
+
+
+def test_get_or_create_label_creates_when_missing():
+    service = MagicMock()
+    service.users().labels().list().execute.return_value = {"labels": []}
+    service.users().labels().create().execute.return_value = {"id": "Label_new"}
+    label_id = get_or_create_label(service, "VIP", background_color="#fb4c2f", text_color="#ffffff")
+    assert label_id == "Label_new"
+    create_kwargs = service.users().labels().create.call_args.kwargs
+    assert create_kwargs["body"]["name"] == "VIP"
+    assert create_kwargs["body"]["color"] == {"backgroundColor": "#fb4c2f", "textColor": "#ffffff"}
+
+
+def test_apply_label_adds_label_id_to_message():
+    service = MagicMock()
+    apply_label(service, "msg-1", "Label_1")
+    service.users().messages().modify.assert_called_once_with(
+        userId="me", id="msg-1", body={"addLabelIds": ["Label_1"]}
     )
 
 
