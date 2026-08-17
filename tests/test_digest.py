@@ -16,6 +16,18 @@ def test_group_routine_messages_counts_and_groups_by_type_and_sender():
     assert groups["notification"]["count"] == 1
 
 
+def test_group_routine_messages_tracks_archived_count():
+    messages = [
+        {"message_type": "newsletter", "sender_name": "X Weekly", "digest_worthy": 1, "archived": 1},
+        {"message_type": "newsletter", "sender_name": "Y News", "digest_worthy": 1, "archived": 0},
+        {"message_type": "receipt", "sender_name": "Store", "digest_worthy": 1, "archived": 1},
+    ]
+    groups = group_routine_messages(messages)
+    assert groups["newsletter"]["archived_count"] == 1
+    assert groups["newsletter"]["count"] == 2
+    assert groups["receipt"]["archived_count"] == 1
+
+
 def test_group_routine_messages_ignores_non_digest_worthy():
     messages = [{"message_type": "human", "sender_name": "Blaine Rout", "digest_worthy": 0}]
     groups = group_routine_messages(messages)

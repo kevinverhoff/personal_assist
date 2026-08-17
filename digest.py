@@ -17,8 +17,10 @@ def group_routine_messages(messages: list[dict]) -> dict:
         if not message.get("digest_worthy"):
             continue
         message_type = message["message_type"]
-        groups.setdefault(message_type, {"count": 0, "senders": []})
+        groups.setdefault(message_type, {"count": 0, "senders": [], "archived_count": 0})
         groups[message_type]["count"] += 1
+        if message.get("archived"):
+            groups[message_type]["archived_count"] += 1
         sender = message["sender_name"]
         if sender not in groups[message_type]["senders"]:
             groups[message_type]["senders"].append(sender)
@@ -31,7 +33,11 @@ def phrase_digest(gemini_client, groups: dict) -> str:
     prompt = (
         "Write 1-3 natural, conversational sentences summarizing this person's routine "
         "email for the period, using ONLY the exact counts and names given below — do not "
-        "invent or alter any number or name.\n\n"
+        "invent or alter any number or name. Each group has a count, a list of senders, and "
+        "an archived_count (how many of that count were already archived out of the inbox, "
+        "vs. left for review) — mention how many were archived if archived_count is greater "
+        "than zero and less than count; if archived_count equals count, say they were all "
+        "archived; if archived_count is zero, don't mention archiving for that group.\n\n"
         f"{json.dumps(groups)}"
     )
     response = gemini_client.models.generate_content(model=_DIGEST_MODEL, contents=prompt)
