@@ -84,6 +84,48 @@ def test_run_processes_messages_and_updates_checkpoint(
 
 
 @_patch_main
+def test_run_records_error_and_continues_when_one_message_fails(
+    mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
+    mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
+    tmp_path, monkeypatch,
+):
+    # Reproduces the real risk: a transient failure (Notion timeout, Gmail
+    # hiccup, a message that vanished mid-run) in per-message side effects
+    # must not crash the whole batch and strand sync_state -- it should be
+    # logged and the run should keep going.
+    _set_env(monkeypatch, tmp_path)
+    mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
+    mock_fetch.return_value = (
+        [_one_message(gmail_message_id="msg-1"), _one_message(gmail_message_id="msg-2")],
+        "history-2",
+    )
+    mock_classify.return_value = {
+        "message_type": "human", "importance": "medium", "action_required": False,
+        "keep_in_inbox": True, "digest_worthy": False, "person_org_signal": None,
+        "confidence": 0.9, "reasoning": "looks real",
+    }
+    mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
+    mock_reconcile.side_effect = [RuntimeError("Notion timeout"), {"action": "no_action"}]
+
+    import main
+    result = main.run(dry_run=False)
+
+    assert result["status"] == "ok_with_errors"
+    assert result["messages_processed"] == 2
+
+    conn = store.init_db(str(tmp_path / "test.db"))
+    rows = conn.execute("SELECT gmail_message_id FROM messages").fetchall()
+    assert [r[0] for r in rows] == ["msg-2"]  # msg-1 failed and was never persisted
+    sync_state = conn.execute("SELECT last_history_id FROM sync_state").fetchone()
+    assert sync_state[0] == "history-2"  # checkpoint still advances -- not stuck retrying msg-1 forever
+    run_log_row = conn.execute("SELECT status, errors FROM run_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert run_log_row["status"] == "ok_with_errors"
+    assert "msg-1" in run_log_row["errors"]
+    assert "Notion timeout" in run_log_row["errors"]
+
+
+@_patch_main
 def test_run_classifier_failure_keeps_message_in_inbox(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,

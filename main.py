@@ -50,72 +50,80 @@ def run(dry_run: bool = False, archive: bool = True) -> dict:
     results, unmatched, errors, archived = [], [], [], []
 
     for message in messages:
-        sig = extract_signals(message["headers"], message["sender_email"])
-        person_match = people_cache.match_by_email(message["sender_email"])
-        classification = classify_message(
-            gemini_client, message["subject"], message["snippet"], message["body"], sig, person_match
-        )
+        try:
+            sig = extract_signals(message["headers"], message["sender_email"])
+            person_match = people_cache.match_by_email(message["sender_email"])
+            classification = classify_message(
+                gemini_client, message["subject"], message["snippet"], message["body"], sig, person_match
+            )
 
-        label_applied = None
-        if not dry_run and person_match:
-            is_vip = person_match.get("importance") == "VIP"
-            label_applied = VIP_LABEL_NAME if is_vip else KNOWN_CONTACT_LABEL_NAME
-            apply_label(gmail_service, message["gmail_message_id"], vip_label_id if is_vip else known_label_id)
+            label_applied = None
+            if not dry_run and person_match:
+                is_vip = person_match.get("importance") == "VIP"
+                label_applied = VIP_LABEL_NAME if is_vip else KNOWN_CONTACT_LABEL_NAME
+                apply_label(gmail_service, message["gmail_message_id"], vip_label_id if is_vip else known_label_id)
 
-        is_human = classification["message_type"] == "human"
-        reconciliation_result = reconcile_sender(
-            notion_client, config, people_cache, message["sender_email"],
-            message["sender_name"], is_human, dry_run,
-        )
-        if reconciliation_result["action"] in ("created_person",) and not person_match:
-            unmatched.append({
+            is_human = classification["message_type"] == "human"
+            reconciliation_result = reconcile_sender(
+                notion_client, config, people_cache, message["sender_email"],
+                message["sender_name"], is_human, dry_run,
+            )
+            if reconciliation_result["action"] in ("created_person",) and not person_match:
+                unmatched.append({
+                    "sender_email": message["sender_email"],
+                    "sender_name": message["sender_name"],
+                    "subject": message["subject"],
+                })
+
+            row = {
+                "gmail_message_id": message["gmail_message_id"],
+                "thread_id": message["thread_id"],
                 "sender_email": message["sender_email"],
                 "sender_name": message["sender_name"],
                 "subject": message["subject"],
-            })
+                "received_at": message["received_at"],
+                "snippet": message["snippet"],
+                "message_type": classification["message_type"],
+                "importance": classification["importance"],
+                "action_required": int(classification["action_required"]),
+                "keep_in_inbox": int(classification["keep_in_inbox"]),
+                "digest_worthy": int(classification["digest_worthy"]),
+                "confidence": classification["confidence"],
+                "reasoning": classification["reasoning"],
+                "person_org_signal": classification["person_org_signal"],
+                "matched_person_id": person_match["person_id"] if person_match else None,
+                "matched_org_ids": None,
+                "processed_at": datetime.datetime.now(datetime.UTC).isoformat(),
+                "run_at": run_at,
+                "label_applied": label_applied,
+            }
+            if not dry_run:
+                store.upsert_message(conn, row)
+            result = {**row, "action_required": bool(row["action_required"]), "keep_in_inbox": bool(row["keep_in_inbox"])}
+            results.append(result)
 
-        row = {
-            "gmail_message_id": message["gmail_message_id"],
-            "thread_id": message["thread_id"],
-            "sender_email": message["sender_email"],
-            "sender_name": message["sender_name"],
-            "subject": message["subject"],
-            "received_at": message["received_at"],
-            "snippet": message["snippet"],
-            "message_type": classification["message_type"],
-            "importance": classification["importance"],
-            "action_required": int(classification["action_required"]),
-            "keep_in_inbox": int(classification["keep_in_inbox"]),
-            "digest_worthy": int(classification["digest_worthy"]),
-            "confidence": classification["confidence"],
-            "reasoning": classification["reasoning"],
-            "person_org_signal": classification["person_org_signal"],
-            "matched_person_id": person_match["person_id"] if person_match else None,
-            "matched_org_ids": None,
-            "processed_at": datetime.datetime.now(datetime.UTC).isoformat(),
-            "run_at": run_at,
-            "label_applied": label_applied,
-        }
-        if not dry_run:
-            store.upsert_message(conn, row)
-        result = {**row, "action_required": bool(row["action_required"]), "keep_in_inbox": bool(row["keep_in_inbox"])}
-        results.append(result)
+            if archive and not dry_run and should_archive(classification, person_match):
+                archive_message(gmail_service, message["gmail_message_id"])
+                archived_at = datetime.datetime.now(datetime.UTC).isoformat()
+                archive_summary = summarize_for_archive(gemini_client, message["subject"], message["body"])
+                store.mark_archived(conn, message["gmail_message_id"], archived_at, archive_summary)
+                result["archive_summary"] = archive_summary
+                archived.append(result)
+        except Exception as error:
+            errors.append(
+                f"{message.get('gmail_message_id')} (\"{message.get('subject')}\") "
+                f"from {message.get('sender_email')}: {error}"
+            )
+            continue
 
-        if archive and not dry_run and should_archive(classification, person_match):
-            archive_message(gmail_service, message["gmail_message_id"])
-            archived_at = datetime.datetime.now(datetime.UTC).isoformat()
-            archive_summary = summarize_for_archive(gemini_client, message["subject"], message["body"])
-            store.mark_archived(conn, message["gmail_message_id"], archived_at, archive_summary)
-            result["archive_summary"] = archive_summary
-            archived.append(result)
-
+    status = "ok" if not errors else "ok_with_errors"
     markdown = append_run_summary(config.log_path, run_at, results, unmatched, errors, archived=archived)
     if not dry_run:
         update_latest_run_page(notion_client, config, conn, markdown)
         store.set_sync_state(conn, new_history_id, run_at)
-        store.insert_run_log(conn, run_at, len(messages), "ok", None)
+        store.insert_run_log(conn, run_at, len(messages), status, "; ".join(errors) if errors else None)
 
-    return {"status": "ok", "messages_processed": len(messages)}
+    return {"status": status, "messages_processed": len(messages)}
 
 
 if __name__ == "__main__":
