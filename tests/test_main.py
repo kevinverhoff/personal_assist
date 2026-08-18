@@ -32,6 +32,7 @@ def _patch_main(test_func):
     """Applies the full set of main.py dependency patches every test needs,
     innermost-first so the wrapped test receives them in call order."""
     decorators = [
+        patch("main.summarize_for_archive"),
         patch("main.update_latest_run_page"),
         patch("main.reconcile_sender"),
         patch("main.PeopleCache"),
@@ -53,6 +54,7 @@ def _patch_main(test_func):
 def test_run_processes_messages_and_updates_checkpoint(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -85,6 +87,7 @@ def test_run_processes_messages_and_updates_checkpoint(
 def test_run_classifier_failure_keeps_message_in_inbox(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -112,11 +115,12 @@ def test_run_classifier_failure_keeps_message_in_inbox(
 def test_run_archives_routine_high_confidence_unmatched_message(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
     mock_get_or_create_label.side_effect = ["vip-label-id", "known-label-id"]
-    mock_fetch.return_value = ([_one_message(sender_email="news@x.com", sender_name="X Weekly")], "history-2")
+    mock_fetch.return_value = ([_one_message(sender_email="news@x.com", sender_name="X Weekly", body="Full newsletter body.")], "history-2")
     mock_classify.return_value = {
         "message_type": "newsletter", "importance": "low", "action_required": False,
         "keep_in_inbox": False, "digest_worthy": True, "person_org_signal": None,
@@ -124,20 +128,24 @@ def test_run_archives_routine_high_confidence_unmatched_message(
     }
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.return_value = {"action": "no_action"}
+    mock_summarize_for_archive.return_value = "This week's top story is about local elections."
 
     import main
     main.run(dry_run=False, archive=True)
 
     mock_archive.assert_called_once_with(mock_gmail_service.return_value, "msg-1")
+    mock_summarize_for_archive.assert_called_once_with(mock_gemini_client.return_value, "Hi", "Full newsletter body.")
     conn = store.init_db(str(tmp_path / "test.db"))
-    row = conn.execute("SELECT archived FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
-    assert row[0] == 1
+    row = conn.execute("SELECT archived, archive_summary FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["archived"] == 1
+    assert row["archive_summary"] == "This week's top story is about local elections."
 
 
 @_patch_main
 def test_run_does_not_archive_when_matched_to_known_person(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -163,6 +171,7 @@ def test_run_does_not_archive_when_matched_to_known_person(
 def test_run_does_not_archive_when_archive_flag_is_false(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -186,6 +195,7 @@ def test_run_does_not_archive_when_archive_flag_is_false(
 def test_run_does_not_archive_during_dry_run(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -210,6 +220,7 @@ def test_run_does_not_archive_during_dry_run(
 def test_run_applies_vip_label_for_vip_known_sender(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -239,6 +250,7 @@ def test_run_applies_vip_label_for_vip_known_sender(
 def test_run_applies_known_contact_label_for_non_vip_known_sender(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)
@@ -267,6 +279,7 @@ def test_run_applies_known_contact_label_for_non_vip_known_sender(
 def test_run_stores_no_label_applied_for_unmatched_sender(
     mock_gmail_service, mock_fetch, mock_archive, mock_get_or_create_label, mock_apply_label,
     mock_gemini_client, mock_classify, mock_notion_cls, mock_cache_cls, mock_reconcile, mock_update_page,
+    mock_summarize_for_archive,
     tmp_path, monkeypatch,
 ):
     _set_env(monkeypatch, tmp_path)

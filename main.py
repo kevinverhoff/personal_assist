@@ -1,6 +1,7 @@
 import argparse
 import datetime
 
+from archive_summary import summarize_for_archive
 from archiving import should_archive
 from classifier import classify_message, make_client
 from config import load_config
@@ -103,7 +104,9 @@ def run(dry_run: bool = False, archive: bool = True) -> dict:
         if archive and not dry_run and should_archive(classification, person_match):
             archive_message(gmail_service, message["gmail_message_id"])
             archived_at = datetime.datetime.now(datetime.UTC).isoformat()
-            store.mark_archived(conn, message["gmail_message_id"], archived_at)
+            archive_summary = summarize_for_archive(gemini_client, message["subject"], message["body"])
+            store.mark_archived(conn, message["gmail_message_id"], archived_at, archive_summary)
+            result["archive_summary"] = archive_summary
             archived.append(result)
 
     markdown = append_run_summary(config.log_path, run_at, results, unmatched, errors, archived=archived)
