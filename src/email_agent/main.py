@@ -1,17 +1,17 @@
 import argparse
 import datetime
 
-from archive_summary import summarize_for_archive
-from archiving import should_archive
-from classifier import classify_message, make_client
-from config import load_config
-from gmail_client import build_service, fetch_new_messages, archive_message, get_or_create_label, apply_label
-from notion_client import NotionClient
-from people_lookup import PeopleCache
-from reconciliation import reconcile_sender
-from agent_log import append_run_summary, update_latest_run_page
-from signals import extract_signals
-import store
+from email_agent.ai.archive_summary import summarize_for_archive
+from email_agent.gmail.archiving import should_archive
+from email_agent.ai.classifier import classify_message, make_client
+from email_agent.config import load_config
+from email_agent.gmail.client import build_service, fetch_new_messages, archive_message, get_or_create_label, apply_label
+from email_agent.notion.client import NotionClient
+from email_agent.notion.people import PeopleCache
+from email_agent.notion.reconciliation import reconcile_sender
+from email_agent.notion.agent_log import append_run_summary, update_latest_run_page
+from email_agent.signals import extract_signals
+from email_agent import store
 
 
 # Gmail's colored "SuperStars" are UI-only and not exposed via the API at

@@ -1,5 +1,5 @@
 """
-Run this once to mint a refresh token: `python gmail_auth_setup.py`
+Run this once to mint a refresh token: `python -m email_agent.gmail.auth_setup`
 Opens a browser for you to consent, then prints the refresh token to paste
 into .env as GOOGLE_REFRESH_TOKEN.
 

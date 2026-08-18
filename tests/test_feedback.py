@@ -1,7 +1,7 @@
 import json
 
-import store
-from feedback import list_recent, record_correction
+from email_agent import store
+from email_agent.feedback import list_recent, record_correction
 
 
 def test_list_recent_returns_messages():

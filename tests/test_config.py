@@ -1,6 +1,6 @@
 import pytest
 
-from config import load_config, ConfigError
+from email_agent.config import load_config, ConfigError
 
 
 def test_load_config_reads_all_fields(full_env):

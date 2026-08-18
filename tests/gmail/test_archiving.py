@@ -1,4 +1,4 @@
-from archiving import should_archive, MIN_ARCHIVE_CONFIDENCE
+from email_agent.gmail.archiving import should_archive, MIN_ARCHIVE_CONFIDENCE
 
 
 def test_should_archive_true_for_routine_high_confidence_unmatched():

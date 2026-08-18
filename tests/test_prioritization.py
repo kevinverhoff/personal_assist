@@ -1,4 +1,4 @@
-from prioritization import (
+from email_agent.prioritization import (
     group_messages, format_compact_line, format_compact_line_with_action,
     format_action_note, format_archived_summary_line, is_attention_worthy, importance_sort_key,
 )

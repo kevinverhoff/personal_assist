@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-from notion_client import NotionClient, _chunk_text
+from email_agent.notion.client import NotionClient, _chunk_text
 
 
 def _mock_response(json_data, status_code=200):
@@ -11,7 +11,7 @@ def _mock_response(json_data, status_code=200):
     return response
 
 
-@patch("notion_client.requests.post")
+@patch("email_agent.notion.client.requests.post")
 def test_query_data_source_sends_correct_request(mock_post):
     mock_post.return_value = _mock_response({"results": [{"id": "page-1", "properties": {}}], "has_more": False})
     client = NotionClient(token="secret_abc")
@@ -25,7 +25,7 @@ def test_query_data_source_sends_correct_request(mock_post):
     assert "Notion-Version" in called_headers
 
 
-@patch("notion_client.requests.post")
+@patch("email_agent.notion.client.requests.post")
 def test_query_data_source_paginates(mock_post):
     mock_post.side_effect = [
         _mock_response({"results": [{"id": "p1", "properties": {}}], "has_more": True, "next_cursor": "cur1"}),
@@ -37,7 +37,7 @@ def test_query_data_source_paginates(mock_post):
     assert mock_post.call_count == 2
 
 
-@patch("notion_client.requests.post")
+@patch("email_agent.notion.client.requests.post")
 def test_create_page_sends_parent_and_properties(mock_post):
     mock_post.return_value = _mock_response({"id": "new-page", "properties": {"Name": {}}})
     client = NotionClient(token="secret_abc")
@@ -48,7 +48,7 @@ def test_create_page_sends_parent_and_properties(mock_post):
     assert payload["properties"]["Name"]["title"][0]["text"]["content"] == "Jane"
 
 
-@patch("notion_client.requests.patch")
+@patch("email_agent.notion.client.requests.patch")
 def test_archive_page_sends_archived_true(mock_patch):
     mock_patch.return_value = _mock_response({"id": "page-1", "archived": True})
     client = NotionClient(token="secret_abc")
@@ -58,7 +58,7 @@ def test_archive_page_sends_archived_true(mock_patch):
     assert payload == {"archived": True}
 
 
-@patch("notion_client.requests.patch")
+@patch("email_agent.notion.client.requests.patch")
 def test_update_page_sends_properties(mock_patch):
     mock_patch.return_value = _mock_response({"id": "page-1", "properties": {}})
     client = NotionClient(token="secret_abc")
@@ -68,9 +68,9 @@ def test_update_page_sends_properties(mock_patch):
     assert payload["properties"]["Status"]["select"]["name"] == "Needs Review"
 
 
-@patch("notion_client.requests.patch")
-@patch("notion_client.requests.delete")
-@patch("notion_client.requests.get")
+@patch("email_agent.notion.client.requests.patch")
+@patch("email_agent.notion.client.requests.delete")
+@patch("email_agent.notion.client.requests.get")
 def test_replace_page_content_deletes_old_blocks_then_appends_new(mock_get, mock_delete, mock_patch):
     mock_get.return_value = _mock_response({"results": [{"id": "block-1"}, {"id": "block-2"}], "has_more": False})
     mock_delete.return_value = _mock_response({})
@@ -112,7 +112,7 @@ def test_chunk_text_splits_many_lines_without_breaking_a_line_mid_way():
         assert line in rejoined
 
 
-@patch("notion_client.requests.post")
+@patch("email_agent.notion.client.requests.post")
 def test_create_page_with_long_content_creates_multiple_blocks(mock_post):
     mock_post.return_value = _mock_response({"id": "page-1"})
     client = NotionClient(token="secret_abc")
@@ -124,7 +124,7 @@ def test_create_page_with_long_content_creates_multiple_blocks(mock_post):
         assert len(block["paragraph"]["rich_text"][0]["text"]["content"]) <= 2000
 
 
-@patch("notion_client.requests.post")
+@patch("email_agent.notion.client.requests.post")
 def test_create_child_page_uses_page_id_parent(mock_post):
     mock_post.return_value = _mock_response({"id": "child-page-1"})
     client = NotionClient(token="secret_abc")

@@ -1,7 +1,7 @@
 from unittest.mock import MagicMock
 
-from reconciliation import reconcile_sender
-from people_lookup import PeopleCache
+from email_agent.notion.reconciliation import reconcile_sender
+from email_agent.notion.people import PeopleCache
 
 
 def _config():

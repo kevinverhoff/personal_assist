@@ -2,13 +2,13 @@ import argparse
 import datetime
 import json
 
-from classifier import make_client
-from config import load_config
-from notion_client import NotionClient
-from prioritization import (
+from email_agent.ai.classifier import make_client
+from email_agent.config import load_config
+from email_agent.notion.client import NotionClient
+from email_agent.prioritization import (
     group_messages, format_compact_line, format_compact_line_with_action, format_archived_summary_line,
 )
-import store
+from email_agent import store
 
 _DIGEST_MODEL = "gemini-flash-lite-latest"
 

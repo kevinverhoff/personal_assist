@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from archive_summary import summarize_for_archive
+from email_agent.ai.archive_summary import summarize_for_archive
 
 
 def test_summarize_for_archive_returns_gemini_text():

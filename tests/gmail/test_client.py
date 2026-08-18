@@ -3,7 +3,7 @@ from unittest.mock import MagicMock
 
 from googleapiclient.errors import HttpError
 
-from gmail_client import fetch_new_messages, _parse_message, archive_message, get_or_create_label, apply_label
+from email_agent.gmail.client import fetch_new_messages, _parse_message, archive_message, get_or_create_label, apply_label
 
 
 class _FakeResp:

@@ -1,6 +1,6 @@
 import sqlite3
 
-import store
+from email_agent import store
 
 
 def test_init_db_creates_tables():

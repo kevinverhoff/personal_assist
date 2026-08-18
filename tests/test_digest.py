@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock
 
-from digest import group_routine_messages, phrase_digest, generate_digest
+from email_agent.digest import group_routine_messages, phrase_digest, generate_digest
 
 
 def test_group_routine_messages_counts_and_groups_by_type_and_sender():
@@ -76,7 +76,7 @@ def test_generate_digest_sections_known_attention_and_routine_are_mutually_exclu
     gemini_response.text = "You received 1 newsletter from X Weekly."
     gemini_client.models.generate_content.return_value = gemini_response
 
-    import store as store_module
+    import email_agent.store as store_module
     original_get_messages = store_module.get_messages_in_window
     store_module.get_messages_in_window = lambda conn, start, end: [known, attention, routine]
     try:
@@ -110,7 +110,7 @@ def test_generate_digest_lists_archived_messages_with_summaries():
     gemini_response.text = "You received 1 newsletter and 1 receipt."
     gemini_client.models.generate_content.return_value = gemini_response
 
-    import store as store_module
+    import email_agent.store as store_module
     original_get_messages = store_module.get_messages_in_window
     store_module.get_messages_in_window = lambda conn, start, end: [archived, kept]
     try:
@@ -137,7 +137,7 @@ def test_generate_digest_archived_section_shows_none_when_nothing_archived():
     gemini_response.text = "You received 1 receipt."
     gemini_client.models.generate_content.return_value = gemini_response
 
-    import store as store_module
+    import email_agent.store as store_module
     original_get_messages = store_module.get_messages_in_window
     store_module.get_messages_in_window = lambda conn, start, end: [kept]
     try:
@@ -167,7 +167,7 @@ def test_generate_digest_current_period_uses_latest_run_and_action_notes():
     gemini_response.text = "Nothing routine to report."
     gemini_client.models.generate_content.return_value = gemini_response
 
-    import store as store_module
+    import email_agent.store as store_module
     original_get_latest_run_at = store_module.get_latest_run_at
     original_get_messages_for_run = store_module.get_messages_for_run
     store_module.get_latest_run_at = lambda conn: "2026-08-17 17:24"
@@ -199,7 +199,7 @@ def test_generate_digest_current_period_with_no_successful_run_yet():
     gemini_response.text = "Nothing routine to report."
     gemini_client.models.generate_content.return_value = gemini_response
 
-    import store as store_module
+    import email_agent.store as store_module
     original_get_latest_run_at = store_module.get_latest_run_at
     store_module.get_latest_run_at = lambda conn: None
     try:

@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock, patch
 
-import store
+from email_agent import store
 
 _ENV = {
     "GOOGLE_CLIENT_ID": "x", "GOOGLE_CLIENT_SECRET": "x", "GOOGLE_REFRESH_TOKEN": "x",
@@ -32,18 +32,18 @@ def _patch_main(test_func):
     """Applies the full set of main.py dependency patches every test needs,
     innermost-first so the wrapped test receives them in call order."""
     decorators = [
-        patch("main.summarize_for_archive"),
-        patch("main.update_latest_run_page"),
-        patch("main.reconcile_sender"),
-        patch("main.PeopleCache"),
-        patch("main.NotionClient"),
-        patch("main.classify_message"),
-        patch("main.make_client"),
-        patch("main.apply_label"),
-        patch("main.get_or_create_label"),
-        patch("main.archive_message"),
-        patch("main.fetch_new_messages"),
-        patch("main.build_service"),
+        patch("email_agent.main.summarize_for_archive"),
+        patch("email_agent.main.update_latest_run_page"),
+        patch("email_agent.main.reconcile_sender"),
+        patch("email_agent.main.PeopleCache"),
+        patch("email_agent.main.NotionClient"),
+        patch("email_agent.main.classify_message"),
+        patch("email_agent.main.make_client"),
+        patch("email_agent.main.apply_label"),
+        patch("email_agent.main.get_or_create_label"),
+        patch("email_agent.main.archive_message"),
+        patch("email_agent.main.fetch_new_messages"),
+        patch("email_agent.main.build_service"),
     ]
     for decorator in reversed(decorators):
         test_func = decorator(test_func)
@@ -68,7 +68,7 @@ def test_run_processes_messages_and_updates_checkpoint(
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.return_value = {"action": "no_action"}
 
-    import main
+    from email_agent import main
     result = main.run(dry_run=False)
 
     assert result["status"] == "ok"
@@ -108,7 +108,7 @@ def test_run_records_error_and_continues_when_one_message_fails(
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.side_effect = [RuntimeError("Notion timeout"), {"action": "no_action"}]
 
-    import main
+    from email_agent import main
     result = main.run(dry_run=False)
 
     assert result["status"] == "ok_with_errors"
@@ -143,7 +143,7 @@ def test_run_classifier_failure_keeps_message_in_inbox(
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.return_value = {"action": "no_action"}
 
-    import main
+    from email_agent import main
     result = main.run(dry_run=False)
     assert result["status"] == "ok"
 
@@ -172,7 +172,7 @@ def test_run_archives_routine_high_confidence_unmatched_message(
     mock_reconcile.return_value = {"action": "no_action"}
     mock_summarize_for_archive.return_value = "This week's top story is about local elections."
 
-    import main
+    from email_agent import main
     main.run(dry_run=False, archive=True)
 
     mock_archive.assert_called_once_with(mock_gmail_service.return_value, "msg-1")
@@ -203,7 +203,7 @@ def test_run_does_not_archive_when_matched_to_known_person(
     )
     mock_reconcile.return_value = {"action": "known", "person_id": "p1"}
 
-    import main
+    from email_agent import main
     main.run(dry_run=False, archive=True)
 
     mock_archive.assert_not_called()
@@ -227,7 +227,7 @@ def test_run_does_not_archive_when_archive_flag_is_false(
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.return_value = {"action": "no_action"}
 
-    import main
+    from email_agent import main
     main.run(dry_run=False, archive=False)
 
     mock_archive.assert_not_called()
@@ -250,7 +250,7 @@ def test_run_does_not_archive_during_dry_run(
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.return_value = {"action": "no_action"}
 
-    import main
+    from email_agent import main
     main.run(dry_run=True, archive=True)
 
     mock_archive.assert_not_called()
@@ -278,7 +278,7 @@ def test_run_applies_vip_label_for_vip_known_sender(
     )
     mock_reconcile.return_value = {"action": "known", "person_id": "p1"}
 
-    import main
+    from email_agent import main
     main.run(dry_run=False, archive=True)
 
     mock_apply_label.assert_called_once_with(mock_gmail_service.return_value, "msg-1", "vip-label-id")
@@ -308,7 +308,7 @@ def test_run_applies_known_contact_label_for_non_vip_known_sender(
     )
     mock_reconcile.return_value = {"action": "known", "person_id": "p2"}
 
-    import main
+    from email_agent import main
     main.run(dry_run=False, archive=True)
 
     mock_apply_label.assert_called_once_with(mock_gmail_service.return_value, "msg-1", "known-label-id")
@@ -335,7 +335,7 @@ def test_run_stores_no_label_applied_for_unmatched_sender(
     mock_cache_cls.load.return_value = MagicMock(match_by_email=lambda e: None)
     mock_reconcile.return_value = {"action": "no_action"}
 
-    import main
+    from email_agent import main
     main.run(dry_run=False)
 
     conn = store.init_db(str(tmp_path / "test.db"))

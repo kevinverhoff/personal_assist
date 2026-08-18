@@ -1,4 +1,4 @@
-from signals import extract_signals
+from email_agent.signals import extract_signals
 
 
 def test_detects_list_unsubscribe():

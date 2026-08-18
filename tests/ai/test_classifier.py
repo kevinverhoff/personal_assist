@@ -1,7 +1,7 @@
 import json
 from unittest.mock import MagicMock
 
-from classifier import classify_message
+from email_agent.ai.classifier import classify_message
 
 
 def _fake_client_returning(payload: dict):

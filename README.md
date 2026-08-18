@@ -20,56 +20,93 @@ the task-by-task build record is in
 ## Where things stand
 
 **Phase 1 is fully built and verified against real Gmail, Gemini, and
-Notion data** — not just unit tests. 115 automated tests pass.
+Notion data** — not just unit tests. 116 automated tests pass.
+
+## Code layout
+
+The package lives at `src/email_agent/`, grouped by what each piece talks
+to. Nothing outside `main.py`/`digest.py` reaches across these groups —
+each is independently understandable.
+
+```
+src/email_agent/
+├── main.py              orchestrator: the whole ingest → classify → act pipeline
+├── digest.py            CLI: daily/weekly/current Notion digest generator
+├── feedback.py          CLI: correct a stored classification
+├── config.py            env var loading, validation
+├── store.py             local SQLite (schema kept D1-compatible for Phase 1b)
+├── signals.py           deterministic header signals fed to the classifier
+├── prioritization.py    shared message grouping/formatting (run summary + digest)
+├── gmail/               everything that talks to the Gmail API
+│   ├── client.py           ingestion, labeling, archiving actions
+│   ├── auth_setup.py       one-time OAuth consent script
+│   └── archiving.py        the should-archive policy
+├── notion/              everything that talks to the Notion API
+│   ├── client.py           thin REST wrapper
+│   ├── people.py           People/Email Addresses cache + matching
+│   ├── reconciliation.py   sender-to-Person write-back logic
+│   └── agent_log.py        notepad log + "Latest Run" Notion page
+└── ai/                  everything that calls Gemini
+    ├── classifier.py       7-dimension per-message classification
+    └── archive_summary.py  per-message summary generated at archive time
+```
+
+`tests/` mirrors this exact structure (`tests/gmail/`, `tests/notion/`,
+`tests/ai/`, plus root-level tests for the shared/orchestration pieces).
 
 What exists today:
 
-- `gmail_client.py` / `gmail_auth_setup.py` — Gmail ingestion scoped to
+- **`gmail/client.py` / `gmail/auth_setup.py`** — Gmail ingestion scoped to
   `in:inbox`, incremental via Gmail's history API (paginated correctly —
   an earlier bug silently dropped messages past the first 100 history
   records; fixed and verified with real mail). Uses the `gmail.modify`
   scope (read + label changes only — no permanent delete, no send).
-- `signals.py` — deterministic header signals (bulk mail, `no-reply@`, etc.)
-  fed to the classifier as context.
-- `classifier.py` — one Gemini call per message, returning 7 independent
-  fields (type, importance, action-required, keep-in-inbox, digest-worthy,
-  person/org signal, confidence) plus reasoning — never collapsed into a
-  single score. Falls back to safe defaults (`keep_in_inbox=true`) on any
-  failure.
-- `people_lookup.py` / `reconciliation.py` — matches senders against the
-  Notion People/Email Addresses databases, and auto-creates/attaches new
-  People and Email Addresses for real senders not yet known — always
-  marked `Needs Review` / `Inferred`, never presented as confirmed fact.
-  The in-memory cache updates itself immediately after every write, so a
-  batch with several messages from the same brand-new sender doesn't
-  create a duplicate Person for each one.
-- `prioritization.py` — shared grouping logic: messages from people in
+- **`signals.py`** — deterministic header signals (bulk mail, `no-reply@`,
+  etc.) fed to the classifier as context.
+- **`ai/classifier.py`** — one Gemini call per message, returning 7
+  independent fields (type, importance, action-required, keep-in-inbox,
+  digest-worthy, person/org signal, confidence) plus reasoning — never
+  collapsed into a single score. Falls back to safe defaults
+  (`keep_in_inbox=true`) on any failure.
+- **`notion/people.py` / `notion/reconciliation.py`** — matches senders
+  against the Notion People/Email Addresses databases, and
+  auto-creates/attaches new People and Email Addresses for real senders
+  not yet known — always marked `Needs Review` / `Inferred`, never
+  presented as confirmed fact. The in-memory cache updates itself
+  immediately after every write, so a batch with several messages from
+  the same brand-new sender doesn't create a duplicate Person for each one.
+- **`prioritization.py`** — shared grouping logic: messages from people in
   your People database first, then anything else that needs attention
   (high/critical importance or action-required), then everything else.
   Used by both the run summary and the digest, formatted compactly
   (`[type] "subject" — sender (email)`).
-- `main.py` — applies a real Gmail label to every message from a sender
+- **`main.py`** — applies a real Gmail label to every message from a sender
   matched in your People database: red **VIP** for VIP-importance people,
   yellow **Known Contact** for everyone else. (Gmail's colored "stars" are
   a Gmail-UI-only feature, not exposed via the API at all — labels are the
   closest API-controllable equivalent.) Skipped entirely on `--dry-run`.
-- `archiving.py` / `main.py` — archives a message (removes the INBOX
-  label, never deletes) only when it's routine (`digest_worthy`),
+- **`gmail/archiving.py` / `main.py`** — archives a message (removes the
+  INBOX label, never deletes) only when it's routine (`digest_worthy`),
   high-confidence (≥ 0.9), **and** the sender does not match anyone in
   your People database. On by default; `--no-archive` opts out for a run.
   Every archived message is logged with enough detail to find and undo it.
-- `archive_summary.py` — at the moment a message is archived, one Gemini
-  call pulls out the key information (and any important links) from the
-  full email body already in memory, capped at ~50 words, so nothing gets
-  lost just because it left the inbox. The summary is stored once and
-  reused by every digest — the raw email body itself is never persisted.
-- `store.py` — local SQLite (schema designed to be a drop-in match for
+  A failure processing any single message (Gmail/Notion hiccup, a message
+  that vanished mid-run) is logged and skipped — it never crashes the
+  whole run or strands the sync checkpoint.
+- **`ai/archive_summary.py`** — at the moment a message is archived, one
+  Gemini call pulls out the key information (and any important links)
+  from the full email body already in memory, capped at ~50 words, so
+  nothing gets lost just because it left the inbox. The summary is stored
+  once and reused by every digest — the raw email body itself is never
+  persisted. The prompt explicitly frames the email content as untrusted
+  data to summarize, not instructions to follow.
+- **`store.py`** — local SQLite (schema designed to be a drop-in match for
   Cloudflare D1 later).
-- `agent_log.py` — a local "notepad" log plus a single Notion "Latest Run"
-  status page, updated in place each run.
-- `digest.py` — `python digest.py --period daily|weekly|current` groups
-  routine mail deterministically (flagging how many of each type were
-  archived vs. kept) and has Gemini phrase (never count) a summary,
+- **`notion/agent_log.py`** — a local "notepad" log plus a single Notion
+  "Latest Run" status page, updated in place each run.
+- **`digest.py`** — `python -m email_agent.digest --period daily|weekly|current`
+  groups routine mail deterministically (flagging how many of each type
+  were archived vs. kept) and has Gemini phrase (never count) a summary,
   written to a dedicated Notion "Email Digests" database. `daily`/`weekly`
   are rolling time windows over everything received in that span,
   regardless of which run processed it. `current` is different: it's
@@ -81,11 +118,29 @@ What exists today:
   also has an "Archived" section listing each archived message
   individually (subject, sender, and its stored summary) so you can spot
   anything you might be missing without having to dig through All Mail.
-- `feedback.py` — a CLI to correct a stored classification, so accuracy
+- **`feedback.py`** — a CLI to correct a stored classification, so accuracy
   can eventually be measured rather than eyeballed.
 
 Everything currently runs **locally, by hand** — no scheduling yet, no
 Cloudflare. That's intentional (see Phase 1b below).
+
+### Known risks before automating (e.g. cron/scheduled runs)
+
+- **OAuth token expiry**: if the Google Cloud OAuth consent screen hasn't
+  been published to production, the refresh token expires after 7 days
+  and a scheduled run silently starts returning `auth_error` — no
+  alerting exists, so this needs to be checked manually.
+- **Model drift**: `ai/classifier.py` and `ai/archive_summary.py` both
+  pin to `"gemini-flash-lite-latest"`, a rolling alias, not a fixed
+  version — Google can change the underlying model without notice.
+- **No concurrency guard**: if a scheduled run is still processing when
+  the next one fires, there's no lock; SQLite doesn't handle concurrent
+  writers well.
+- **No budget cap or retry/backoff** on Notion/Gmail/Gemini API calls.
+- Auto-archiving is a trust bet on the classifier's self-reported
+  confidence — the digest's "Archived" section (with per-message
+  summaries) exists specifically so a misclassified important email
+  doesn't go unnoticed, but only if it's actually read regularly.
 
 ### Next steps
 
@@ -113,8 +168,12 @@ Agent" parent page.
    ```bash
    python -m venv .venv
    source .venv/Scripts/activate   # Windows Git Bash; use .venv/bin/activate on macOS/Linux
-   pip install -r requirements.txt
+   pip install -e ".[dev]"
    ```
+
+   This installs `email_agent` itself in editable mode (so `python -m
+   email_agent.main` etc. work from anywhere) plus pytest. Dependencies
+   are declared in `pyproject.toml`.
 
 2. **Configure secrets:** copy `env.example` to `.env` and fill in real
    values. See `env.example` for exactly which keys are needed and where
@@ -126,7 +185,7 @@ Agent" parent page.
 3. **One-time Gmail OAuth consent:**
 
    ```bash
-   python gmail_auth_setup.py
+   python -m email_agent.gmail.auth_setup
    ```
 
    This opens a browser for you to log in and consent (you'll see an
@@ -148,11 +207,11 @@ Agent" parent page.
 5. **Run the pipeline:**
 
    ```bash
-   python main.py --dry-run     # logs what would happen, writes nothing to Notion/Gmail
-   python main.py               # the real thing — archives routine mail by default
-   python main.py --no-archive  # real Notion writes, but never archives anything
-   python digest.py --period daily    # or --period weekly / --period current
-   python feedback.py           # correct a recent classification
+   python -m email_agent.main --dry-run     # logs what would happen, writes nothing to Notion/Gmail
+   python -m email_agent.main               # the real thing — archives routine mail by default
+   python -m email_agent.main --no-archive  # real Notion writes, but never archives anything
+   python -m email_agent.digest --period daily    # or --period weekly / --period current
+   python -m email_agent.feedback           # correct a recent classification
    ```
 
    Check `logs/agent_log.md` after a run, or the "Email Agent — Latest Run"

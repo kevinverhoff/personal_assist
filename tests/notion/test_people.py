@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 
-from people_lookup import PeopleCache, normalize_name, NAME_MATCH_THRESHOLD
+from email_agent.notion.people import PeopleCache, normalize_name, NAME_MATCH_THRESHOLD
 
 
 def _fake_client(people_pages, email_pages):

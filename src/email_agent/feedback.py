@@ -1,8 +1,8 @@
 import datetime
 import json
 
-from config import load_config
-import store
+from email_agent.config import load_config
+from email_agent import store
 
 
 def list_recent(conn, limit: int = 10) -> list[dict]:

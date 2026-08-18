@@ -1,8 +1,8 @@
 import os
 from unittest.mock import MagicMock
 
-import store
-from agent_log import append_run_summary, update_latest_run_page
+from email_agent import store
+from email_agent.notion.agent_log import append_run_summary, update_latest_run_page
 
 
 def _message(**overrides):

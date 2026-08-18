@@ -1,6 +1,6 @@
 import os
 
-from prioritization import group_messages, format_compact_line
+from email_agent.prioritization import group_messages, format_compact_line
 
 _NOTION_PAGES_SCHEMA = """
 CREATE TABLE IF NOT EXISTS notion_pages (
