@@ -107,6 +107,36 @@ def test_mark_archived_sets_flag_and_timestamp():
     assert row["archived_at"] == "2026-08-17T07:05:00Z"
 
 
+def test_mark_archived_stores_archive_summary():
+    conn = store.init_db(":memory:")
+    store.upsert_message(conn, {
+        "gmail_message_id": "msg-1", "thread_id": "t", "sender_email": "a@x.com",
+        "sender_name": "A", "subject": "s", "received_at": "2026-08-17T07:00:00Z", "snippet": "",
+        "message_type": "newsletter", "importance": "low", "action_required": 0,
+        "keep_in_inbox": 0, "digest_worthy": 1, "confidence": 0.95, "reasoning": "r",
+        "person_org_signal": None, "matched_person_id": None, "matched_org_ids": None,
+        "processed_at": "2026-08-17T07:00:01Z",
+    })
+    store.mark_archived(conn, "msg-1", "2026-08-17T07:05:00Z", archive_summary="Your package ships Tuesday.")
+    row = conn.execute("SELECT archive_summary FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["archive_summary"] == "Your package ships Tuesday."
+
+
+def test_mark_archived_without_summary_defaults_to_none():
+    conn = store.init_db(":memory:")
+    store.upsert_message(conn, {
+        "gmail_message_id": "msg-1", "thread_id": "t", "sender_email": "a@x.com",
+        "sender_name": "A", "subject": "s", "received_at": "2026-08-17T07:00:00Z", "snippet": "",
+        "message_type": "newsletter", "importance": "low", "action_required": 0,
+        "keep_in_inbox": 0, "digest_worthy": 1, "confidence": 0.95, "reasoning": "r",
+        "person_org_signal": None, "matched_person_id": None, "matched_org_ids": None,
+        "processed_at": "2026-08-17T07:00:01Z",
+    })
+    store.mark_archived(conn, "msg-1", "2026-08-17T07:05:00Z")
+    row = conn.execute("SELECT archive_summary FROM messages WHERE gmail_message_id = 'msg-1'").fetchone()
+    assert row["archive_summary"] is None
+
+
 def test_new_messages_default_to_not_archived():
     conn = store.init_db(":memory:")
     store.upsert_message(conn, {
@@ -140,15 +170,17 @@ def test_init_db_adds_new_columns_to_legacy_messages_table(tmp_path):
 
     conn = store.init_db(db_path)
     columns = {row[1] for row in conn.execute("PRAGMA table_info(messages)")}
-    assert {"archived", "archived_at", "run_at", "label_applied"} <= columns
+    assert {"archived", "archived_at", "run_at", "label_applied", "archive_summary"} <= columns
     row = conn.execute(
-        "SELECT subject, archived, archived_at, run_at, label_applied FROM messages WHERE gmail_message_id = 'msg-1'"
+        "SELECT subject, archived, archived_at, run_at, label_applied, archive_summary "
+        "FROM messages WHERE gmail_message_id = 'msg-1'"
     ).fetchone()
     assert row["subject"] == "old subject"
     assert row["archived"] == 0  # SQLite backfills ADD COLUMN ... DEFAULT 0 onto existing rows
     assert row["archived_at"] is None
     assert row["run_at"] is None
     assert row["label_applied"] is None
+    assert row["archive_summary"] is None
 
 
 def test_get_latest_run_at_returns_most_recent_ok_run():

@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS messages (
   archived INTEGER DEFAULT 0,
   archived_at TEXT,
   run_at TEXT,
-  label_applied TEXT
+  label_applied TEXT,
+  archive_summary TEXT
 );
 
 CREATE TABLE IF NOT EXISTS sync_state (
@@ -66,6 +67,7 @@ _MIGRATION_COLUMNS = {
     "archived_at": "TEXT",
     "run_at": "TEXT",
     "label_applied": "TEXT",
+    "archive_summary": "TEXT",
 }
 
 
@@ -133,10 +135,10 @@ def insert_feedback(conn: sqlite3.Connection, gmail_message_id: str, original_cl
     conn.commit()
 
 
-def mark_archived(conn: sqlite3.Connection, gmail_message_id: str, archived_at: str) -> None:
+def mark_archived(conn: sqlite3.Connection, gmail_message_id: str, archived_at: str, archive_summary: str | None = None) -> None:
     conn.execute(
-        "UPDATE messages SET archived = 1, archived_at = ? WHERE gmail_message_id = ?",
-        (archived_at, gmail_message_id),
+        "UPDATE messages SET archived = 1, archived_at = ?, archive_summary = ? WHERE gmail_message_id = ?",
+        (archived_at, archive_summary, gmail_message_id),
     )
     conn.commit()
 
