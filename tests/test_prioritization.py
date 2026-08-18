@@ -1,6 +1,6 @@
 from prioritization import (
     group_messages, format_compact_line, format_compact_line_with_action,
-    format_action_note, is_attention_worthy, importance_sort_key,
+    format_action_note, format_archived_summary_line, is_attention_worthy, importance_sort_key,
 )
 
 
@@ -35,6 +35,14 @@ def test_importance_sort_key_orders_critical_first():
     messages = [_message(importance="low"), _message(importance="critical"), _message(importance="medium")]
     messages.sort(key=importance_sort_key)
     assert [m["importance"] for m in messages] == ["critical", "medium", "low"]
+
+
+def test_format_archived_summary_line_includes_subject_sender_and_summary():
+    line = format_archived_summary_line(_message(
+        subject="Your order shipped", sender_name="SoFi", sender_email="no-reply@o.sofi.org",
+        archive_summary="Your package ships Tuesday.",
+    ))
+    assert line == '- "Your order shipped" — SoFi (no-reply@o.sofi.org): Your package ships Tuesday.'
 
 
 def test_group_messages_partitions_known_attention_rest():

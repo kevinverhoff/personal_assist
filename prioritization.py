@@ -25,6 +25,10 @@ def format_compact_line_with_action(message: dict) -> str:
     return f"{format_compact_line(message)} — {format_action_note(message)}"
 
 
+def format_archived_summary_line(message: dict) -> str:
+    return f"- \"{message['subject']}\" — {message['sender_name']} ({message['sender_email']}): {message['archive_summary']}"
+
+
 def group_messages(messages: list[dict]) -> dict:
     known, attention, rest = [], [], []
     for message in messages:
