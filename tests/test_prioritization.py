@@ -45,6 +45,15 @@ def test_format_archived_summary_line_includes_subject_sender_and_summary():
     assert line == '- "Your order shipped" — SoFi (no-reply@o.sofi.org): Your package ships Tuesday.'
 
 
+def test_format_archived_summary_line_falls_back_when_summary_missing():
+    # Reproduces messages archived before this feature existed -- no
+    # archive_summary column value yet, must degrade, not crash.
+    line = format_archived_summary_line(_message(
+        subject="Your order shipped", sender_name="SoFi", sender_email="no-reply@o.sofi.org",
+    ))
+    assert line == '- "Your order shipped" — SoFi (no-reply@o.sofi.org): (no summary available)'
+
+
 def test_group_messages_partitions_known_attention_rest():
     known_msg = _message(gmail_message_id="m1", matched_person_id="p1", importance="low")
     attention_msg = _message(gmail_message_id="m2", matched_person_id=None, importance="high")

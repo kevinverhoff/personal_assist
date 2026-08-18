@@ -5,7 +5,9 @@ import json
 from classifier import make_client
 from config import load_config
 from notion_client import NotionClient
-from prioritization import group_messages, format_compact_line, format_compact_line_with_action
+from prioritization import (
+    group_messages, format_compact_line, format_compact_line_with_action, format_archived_summary_line,
+)
 import store
 
 _DIGEST_MODEL = "gemini-flash-lite-latest"
@@ -80,6 +82,13 @@ def generate_digest(config, conn, notion_client, gemini_client, period: str) -> 
     body_lines.append("")
     body_lines.append("## Routine mail")
     body_lines.append(routine_text)
+    body_lines.append("")
+    archived_messages = [m for m in messages if m.get("archived")]
+    body_lines.append(f"## Archived ({len(archived_messages)})")
+    if archived_messages:
+        body_lines.extend(format_archived_summary_line(m) for m in archived_messages)
+    else:
+        body_lines.append("None.")
     content = "\n".join(body_lines)
 
     if period == "current":

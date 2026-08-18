@@ -92,6 +92,64 @@ def test_generate_digest_sections_known_attention_and_routine_are_mutually_exclu
     assert "news@x.com" not in content_children.split("## Routine mail")[0]
 
 
+def test_generate_digest_lists_archived_messages_with_summaries():
+    archived = _message(gmail_message_id="m1", message_type="newsletter", digest_worthy=1,
+                         subject="Weekly News", sender_name="X Weekly", sender_email="news@x.com",
+                         archived=1, archive_summary="Top story: local elections. https://x.com/news/1")
+    kept = _message(gmail_message_id="m2", message_type="receipt", digest_worthy=1,
+                     subject="Your receipt", sender_name="Store", sender_email="no-reply@store.com",
+                     archived=0)
+
+    conn = MagicMock()
+    config = MagicMock()
+    config.notion_email_digests_data_source_id = "digests-ds"
+    notion_client = MagicMock()
+    notion_client.create_page.return_value = {"id": "digest-page-1"}
+    gemini_client = MagicMock()
+    gemini_response = MagicMock()
+    gemini_response.text = "You received 1 newsletter and 1 receipt."
+    gemini_client.models.generate_content.return_value = gemini_response
+
+    import store as store_module
+    original_get_messages = store_module.get_messages_in_window
+    store_module.get_messages_in_window = lambda conn, start, end: [archived, kept]
+    try:
+        generate_digest(config, conn, notion_client, gemini_client, "daily")
+    finally:
+        store_module.get_messages_in_window = original_get_messages
+
+    content = notion_client.create_page.call_args.kwargs["content"]
+    assert '- "Weekly News" — X Weekly (news@x.com): Top story: local elections. https://x.com/news/1' in content
+    assert "Your receipt" not in content.split("## Archived")[1]  # only archived ones listed here
+
+
+def test_generate_digest_archived_section_shows_none_when_nothing_archived():
+    kept = _message(gmail_message_id="m1", message_type="receipt", digest_worthy=1,
+                     subject="Your receipt", sender_name="Store", sender_email="no-reply@store.com", archived=0)
+
+    conn = MagicMock()
+    config = MagicMock()
+    config.notion_email_digests_data_source_id = "digests-ds"
+    notion_client = MagicMock()
+    notion_client.create_page.return_value = {"id": "digest-page-1"}
+    gemini_client = MagicMock()
+    gemini_response = MagicMock()
+    gemini_response.text = "You received 1 receipt."
+    gemini_client.models.generate_content.return_value = gemini_response
+
+    import store as store_module
+    original_get_messages = store_module.get_messages_in_window
+    store_module.get_messages_in_window = lambda conn, start, end: [kept]
+    try:
+        generate_digest(config, conn, notion_client, gemini_client, "daily")
+    finally:
+        store_module.get_messages_in_window = original_get_messages
+
+    content = notion_client.create_page.call_args.kwargs["content"]
+    assert "## Archived" in content
+    assert "None." in content.split("## Archived")[1]
+
+
 def test_generate_digest_current_period_uses_latest_run_and_action_notes():
     known = _message(gmail_message_id="m1", matched_person_id="p1", message_type="human",
                       subject="Draft", sender_name="Blaine Rout", sender_email="brout@cityofgreencastle.com",
