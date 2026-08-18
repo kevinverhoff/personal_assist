@@ -20,7 +20,7 @@ the task-by-task build record is in
 ## Where things stand
 
 **Phase 1 is fully built and verified against real Gmail, Gemini, and
-Notion data** — not just unit tests. 105 automated tests pass.
+Notion data** — not just unit tests. 115 automated tests pass.
 
 What exists today:
 
@@ -58,6 +58,11 @@ What exists today:
   high-confidence (≥ 0.9), **and** the sender does not match anyone in
   your People database. On by default; `--no-archive` opts out for a run.
   Every archived message is logged with enough detail to find and undo it.
+- `archive_summary.py` — at the moment a message is archived, one Gemini
+  call pulls out the key information (and any important links) from the
+  full email body already in memory, capped at ~50 words, so nothing gets
+  lost just because it left the inbox. The summary is stored once and
+  reused by every digest — the raw email body itself is never persisted.
 - `store.py` — local SQLite (schema designed to be a drop-in match for
   Cloudflare D1 later).
 - `agent_log.py` — a local "notepad" log plus a single Notion "Latest Run"
@@ -72,7 +77,10 @@ What exists today:
   tag stored per message), and every known/attention line is annotated
   with exactly what happened to that message — `archived`, `labeled VIP`,
   `labeled Known Contact`, or `kept in inbox` — so it reads as "here's
-  what just happened to my inbox," not a rolling summary.
+  what just happened to my inbox," not a rolling summary. Every digest
+  also has an "Archived" section listing each archived message
+  individually (subject, sender, and its stored summary) so you can spot
+  anything you might be missing without having to dig through All Mail.
 - `feedback.py` — a CLI to correct a stored classification, so accuracy
   can eventually be measured rather than eyeballed.
 
